@@ -1,0 +1,111 @@
+.PHONY: build run test clean docker-build docker-run lint fmt deps
+
+# Binary name
+BINARY=gprint
+MAIN_PATH=./cmd/server
+
+# Go parameters
+GOCMD=go
+GOBUILD=$(GOCMD) build
+GORUN=$(GOCMD) run
+GOTEST=$(GOCMD) test
+GOGET=$(GOCMD) get
+GOMOD=$(GOCMD) mod
+GOFMT=gofmt
+GOLINT=golangci-lint
+
+# Build flags
+LDFLAGS=-ldflags "-s -w"
+
+# Default target
+all: deps lint test build
+
+# Install dependencies
+deps:
+	$(GOMOD) download
+	$(GOMOD) tidy
+
+# Build the application
+build:
+	@mkdir -p bin
+	$(GOBUILD) $(LDFLAGS) -o bin/$(BINARY) $(MAIN_PATH)
+
+# Build for Linux (for Docker)
+build-linux:
+	@mkdir -p bin
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o bin/$(BINARY)-linux $(MAIN_PATH)
+
+# Run the application
+run:
+	DYLD_LIBRARY_PATH=$(CURDIR)/lib TNS_ADMIN=$(CURDIR)/wallet $(GORUN) $(MAIN_PATH)
+
+# Run with hot reload (requires air: go install github.com/cosmtrek/air@latest)
+dev:
+	air
+
+# Run tests
+test:
+	$(GOTEST) -v -race -cover ./...
+
+# Run tests with coverage report
+test-coverage:
+	$(GOTEST) -v -race -coverprofile=coverage.out ./...
+	$(GOCMD) tool cover -html=coverage.out -o coverage.html
+
+# Format code
+fmt:
+	$(GOFMT) -s -w .
+
+# Lint code (requires golangci-lint)
+lint:
+	$(GOLINT) run ./...
+
+# Clean build artifacts
+clean:
+	rm -rf bin/
+	rm -f coverage.out coverage.html
+
+# Docker build
+docker-build:
+	docker build -t gprint:latest .
+
+# Docker run
+docker-run:
+	docker run -p 8080:8080 --env-file .env gprint:latest
+
+# Docker compose up
+docker-up:
+	docker-compose up -d
+
+# Docker compose down
+docker-down:
+	docker-compose down
+
+# Generate mocks (requires mockgen)
+mocks:
+	go generate ./...
+
+# Database migration (example - adjust for your migration tool)
+migrate-up:
+	@echo "Run migrations manually using Oracle SQL*Plus or your preferred tool"
+	@echo "Migration file: migrations/001_initial_schema.sql"
+
+# Show help
+help:
+	@echo "Available targets:"
+	@echo "  all           - Run deps, lint, test, and build"
+	@echo "  deps          - Download and tidy dependencies"
+	@echo "  build         - Build the application"
+	@echo "  build-linux   - Build for Linux (Docker)"
+	@echo "  run           - Run the application"
+	@echo "  dev           - Run with hot reload (requires air)"
+	@echo "  test          - Run tests"
+	@echo "  test-coverage - Run tests with coverage report"
+	@echo "  fmt           - Format code"
+	@echo "  lint          - Lint code (requires golangci-lint)"
+	@echo "  clean         - Clean build artifacts"
+	@echo "  docker-build  - Build Docker image"
+	@echo "  docker-run    - Run Docker container"
+	@echo "  docker-up     - Start with docker-compose"
+	@echo "  docker-down   - Stop docker-compose"
+	@echo "  help          - Show this help"

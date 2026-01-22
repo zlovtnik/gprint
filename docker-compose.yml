@@ -1,0 +1,53 @@
+version: '3.8'
+
+services:
+  gprint:
+    build: .
+    container_name: gprint
+    ports:
+      - "8080:8080"
+    environment:
+      - SERVER_HOST=0.0.0.0
+      - SERVER_PORT=8080
+      - ORACLE_HOST=${ORACLE_HOST:-oracle}
+      - ORACLE_PORT=${ORACLE_PORT:-1521}
+      - ORACLE_SERVICE=${ORACLE_SERVICE:-ORCL}
+      - ORACLE_USER=${ORACLE_USER:?ORACLE_USER must be set}
+      - ORACLE_PASSWORD=${ORACLE_PASSWORD:?ORACLE_PASSWORD must be set}
+      - JWT_SECRET=${JWT_SECRET:?JWT_SECRET must be set}
+      - AUTH_SERVICE_URL=${AUTH_SERVICE_URL:-http://auth:8081}
+    volumes:
+      - ./output:/app/output
+    depends_on:
+      oracle:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  oracle:
+    image: container-registry.oracle.com/database/express:21.3.0-xe
+    container_name: oracle-db
+    ports:
+      - "1521:1521"
+      - "5500:5500"
+    environment:
+      - ORACLE_PWD=${ORACLE_PASSWORD:?ORACLE_PASSWORD must be set}
+      - ORACLE_CHARACTERSET=AL32UTF8
+    volumes:
+      - oracle-data:/opt/oracle/oradata
+      - ./migrations:/docker-entrypoint-initdb.d
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/oracle/checkDBStatus.sh || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 120s
+
+volumes:
+  oracle-data:

@@ -1,0 +1,54 @@
+# Binaries
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test files
+*.test
+coverage.out
+coverage.html
+
+# Output directory
+output/
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Temp files
+tmp/
+*.tmp
+
+# Air (hot reload)
+.air.toml
+
+# Build artifacts
+dist/
+
+# Oracle Instant Client (project-specific lib folder with Oracle libraries)
+/lib/
+
+# Oracle wallet folder (contains credentials and connection info)
+/wallet/
