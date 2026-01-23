@@ -65,9 +65,10 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 # Create wallet and output directories
 # Wallet is decoded at runtime from WALLET_BASE64 env var
-RUN mkdir -p /app/wallet /app/output && chown -R appuser:appuser /app
+RUN mkdir -p /app/wallet /app/output /opt/oracle/instantclient/network/admin && \
+    chown -R appuser:appuser /app /opt/oracle/instantclient/network/admin
 
-# Switch to non-root user
+# Run as appuser (entrypoint will have write access to network/admin)
 USER appuser
 
 # Expose port

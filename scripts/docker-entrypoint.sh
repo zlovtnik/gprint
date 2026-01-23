@@ -9,6 +9,12 @@ if [ -n "$WALLET_BASE64" ]; then
     unzip -q -o /tmp/wallet.zip -d /app/wallet
     rm /tmp/wallet.zip
     echo "Wallet decoded successfully"
+    
+    # Create symlink so Oracle client finds tnsnames.ora
+    # Oracle looks in $ORACLE_HOME/network/admin by default
+    mkdir -p /opt/oracle/instantclient/network/admin
+    ln -sf /app/wallet/* /opt/oracle/instantclient/network/admin/
+    echo "Wallet files linked to Oracle network/admin"
 fi
 
 # Verify wallet exists
