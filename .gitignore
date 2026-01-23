@@ -47,6 +47,8 @@ tmp/
 # Build artifacts
 dist/
 
+# Oracle Instant Client for Linux (too large for git, downloaded during Docker build)
+/lib-linux/
 
 # Oracle wallet folder (contains credentials and connection info)
 /wallet/

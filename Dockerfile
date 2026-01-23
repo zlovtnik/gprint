@@ -1,28 +1,26 @@
-# Build stage - use Oracle Linux for native Oracle client compatibility
+# Build stage with Go and Oracle Instant Client
 FROM golang:1.23-bookworm AS builder
 
 WORKDIR /app
 
-# Install Oracle Instant Client for build (required for godror CGO compilation)
+# Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libaio1 \
-    wget \
     unzip \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Download and install Oracle Instant Client Basic + SDK
-RUN mkdir -p /opt/oracle && \
-    cd /opt/oracle && \
-    wget -q https://download.oracle.com/otn_software/linux/instantclient/2370000/instantclient-basic-linux.x64-23.7.0.25.01.zip && \
-    wget -q https://download.oracle.com/otn_software/linux/instantclient/2370000/instantclient-sdk-linux.x64-23.7.0.25.01.zip && \
-    unzip -q instantclient-basic-linux.x64-23.7.0.25.01.zip && \
-    unzip -q instantclient-sdk-linux.x64-23.7.0.25.01.zip && \
-    rm -f *.zip && \
-    echo /opt/oracle/instantclient_23_7 > /etc/ld.so.conf.d/oracle-instantclient.conf && \
+# Download Oracle Instant Client 23.6 (stable version with direct download URL)
+RUN mkdir -p /opt/oracle && cd /opt/oracle && \
+    curl -fsSL -o instantclient.zip "https://download.oracle.com/otn_software/linux/instantclient/2360000/instantclient-basiclite-linux.x64-23.6.0.24.10.zip" && \
+    unzip -q instantclient.zip && \
+    rm instantclient.zip && \
+    mv instantclient_* instantclient && \
+    echo /opt/oracle/instantclient > /etc/ld.so.conf.d/oracle-instantclient.conf && \
     ldconfig
 
-ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_7
-ENV PKG_CONFIG_PATH=/opt/oracle/instantclient_23_7
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient
+ENV ORACLE_HOME=/opt/oracle/instantclient
 
 # Copy go mod files
 COPY go.mod go.sum ./
@@ -47,11 +45,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy Oracle Instant Client from builder
-COPY --from=builder /opt/oracle/instantclient_23_7 /opt/oracle/instantclient_23_7
-RUN echo /opt/oracle/instantclient_23_7 > /etc/ld.so.conf.d/oracle-instantclient.conf && ldconfig
+# Copy Oracle Instant Client from builder stage
+COPY --from=builder /opt/oracle/instantclient /opt/oracle/instantclient
+RUN echo /opt/oracle/instantclient > /etc/ld.so.conf.d/oracle-instantclient.conf && ldconfig
 
-ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_7
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient
 ENV TNS_ADMIN=/app/wallet
 
 # Create non-root user
