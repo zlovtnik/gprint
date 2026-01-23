@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -18,11 +21,40 @@ import (
 )
 
 func main() {
+	cfg, logger := loadConfigAndLogger()
+
+	db := setupDatabase(cfg, logger)
+
+	repos := setupRepositories(db)
+
+	services := setupServices(repos, cfg, logger)
+
+	handlers := setupHandlers(services, db)
+
+	r := setupRouter(cfg, logger, handlers)
+
+	server := setupServer(cfg, r)
+
+	cancel, bgWg := startBackgroundJobs(services.printSvc, cfg, logger)
+
+	serverErrCh := startServer(server, logger)
+
+	exitCode := waitForShutdown(server, db, cancel, bgWg, serverErrCh, logger, cfg)
+
+	if exitCode != 0 {
+		os.Exit(exitCode)
+	}
+}
+
+func loadConfigAndLogger() (*config.Config, *slog.Logger) {
 	// Load configuration first so we can use it for logger setup
 	cfg := config.Load()
 
 	// Parse log level from configuration
-	logLevel := parseLogLevel(cfg.LogLevel)
+	logLevel, ok := parseLogLevel(cfg.LogLevel)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "WARNING: unknown log level %q, defaulting to info\n", cfg.LogLevel)
+	}
 
 	// Initialize logger with configurable level
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
@@ -35,6 +67,10 @@ func main() {
 		"port", cfg.Server.Port,
 	)
 
+	return cfg, logger
+}
+
+func setupDatabase(cfg *config.Config, logger *slog.Logger) *sql.DB {
 	// Connect to database
 	db, err := config.NewOracleDB(cfg.Database)
 	if err != nil {
@@ -43,7 +79,36 @@ func main() {
 	}
 	// Note: db.Close() is called explicitly during graceful shutdown
 	logger.Info("connected to database")
+	return db
+}
 
+// repositories holds all repository instances
+type repositories struct {
+	customerRepo *repository.CustomerRepository
+	serviceRepo  *repository.ServiceRepository
+	contractRepo *repository.ContractRepository
+	historyRepo  *repository.HistoryRepository
+	printJobRepo *repository.PrintJobRepository
+}
+
+// services holds all service instances
+type services struct {
+	customerSvc *service.CustomerService
+	serviceSvc  *service.ServiceService
+	contractSvc *service.ContractService
+	printSvc    *service.PrintService
+}
+
+// handlerSet holds all handler instances
+type handlerSet struct {
+	customerHandler *handlers.CustomerHandler
+	serviceHandler  *handlers.ServiceHandler
+	contractHandler *handlers.ContractHandler
+	printHandler    *handlers.PrintHandler
+	healthHandler   *handlers.HealthHandler
+}
+
+func setupRepositories(db *sql.DB) repositories {
 	// Initialize repositories
 	customerRepo := repository.NewCustomerRepository(db)
 	serviceRepo := repository.NewServiceRepository(db)
@@ -51,52 +116,98 @@ func main() {
 	historyRepo := repository.NewHistoryRepository(db)
 	printJobRepo := repository.NewPrintJobRepository(db)
 
+	return repositories{
+		customerRepo: customerRepo,
+		serviceRepo:  serviceRepo,
+		contractRepo: contractRepo,
+		historyRepo:  historyRepo,
+		printJobRepo: printJobRepo,
+	}
+}
+
+func setupServices(repos repositories, cfg *config.Config, logger *slog.Logger) services {
 	// Initialize services
-	customerSvc := service.NewCustomerService(customerRepo)
-	serviceSvc := service.NewServiceService(serviceRepo)
-	contractSvc := service.NewContractService(contractRepo, historyRepo)
-	printSvc, err := service.NewPrintService(printJobRepo, contractRepo, historyRepo, cfg.Print.OutputPath, logger)
+	customerSvc := service.NewCustomerService(repos.customerRepo)
+	serviceSvc := service.NewServiceService(repos.serviceRepo)
+	contractSvc := service.NewContractService(repos.contractRepo, repos.historyRepo)
+	printSvc, err := service.NewPrintService(repos.printJobRepo, repos.contractRepo, repos.historyRepo, cfg.Print.OutputPath, logger)
 	if err != nil {
 		logger.Error("failed to create print service", "error", err)
 		os.Exit(1)
 	}
 
+	return services{
+		customerSvc: customerSvc,
+		serviceSvc:  serviceSvc,
+		contractSvc: contractSvc,
+		printSvc:    printSvc,
+	}
+}
+
+func setupHandlers(svcs services, db *sql.DB) handlerSet {
 	// Initialize handlers
-	customerHandler := handlers.NewCustomerHandler(customerSvc)
-	serviceHandler := handlers.NewServiceHandler(serviceSvc)
-	contractHandler := handlers.NewContractHandler(contractSvc)
-	printHandler := handlers.NewPrintHandler(printSvc)
+	customerHandler := handlers.NewCustomerHandler(svcs.customerSvc)
+	serviceHandler := handlers.NewServiceHandler(svcs.serviceSvc)
+	contractHandler := handlers.NewContractHandler(svcs.contractSvc)
+	printHandler := handlers.NewPrintHandler(svcs.printSvc)
 	healthHandler := handlers.NewHealthHandler(db)
 
+	return handlerSet{
+		customerHandler: customerHandler,
+		serviceHandler:  serviceHandler,
+		contractHandler: contractHandler,
+		printHandler:    printHandler,
+		healthHandler:   healthHandler,
+	}
+}
+
+func setupRouter(cfg *config.Config, logger *slog.Logger, h handlerSet) *router.Router {
 	// Initialize router
 	r := router.NewRouter(
 		cfg.JWT.Secret,
 		logger,
-		customerHandler,
-		serviceHandler,
-		contractHandler,
-		printHandler,
-		healthHandler,
+		h.customerHandler,
+		h.serviceHandler,
+		h.contractHandler,
+		h.printHandler,
+		h.healthHandler,
 	)
+	return r
+}
 
+func setupServer(cfg *config.Config, r *router.Router) *http.Server {
 	// Create HTTP server
 	server := &http.Server{
-		Addr:         cfg.Server.Host + ":" + cfg.Server.Port,
-		Handler:      r.Setup(),
-		ReadTimeout:  cfg.Server.ReadTimeout,
-		WriteTimeout: cfg.Server.WriteTimeout,
-		IdleTimeout:  cfg.Server.IdleTimeout,
+		Addr:           cfg.Server.Host + ":" + cfg.Server.Port,
+		Handler:        r.Setup(),
+		ReadTimeout:    cfg.Server.ReadTimeout,
+		WriteTimeout:   cfg.Server.WriteTimeout,
+		IdleTimeout:    cfg.Server.IdleTimeout,
+		MaxHeaderBytes: cfg.Server.MaxHeaderBytes,
 	}
+	return server
+}
 
+func startBackgroundJobs(printSvc *service.PrintService, cfg *config.Config, logger *slog.Logger) (context.CancelFunc, *sync.WaitGroup) {
 	// Start background print job processor
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
+	// WaitGroup to track the background goroutine for graceful shutdown
+	var wg sync.WaitGroup
+
+	// Mutex to prevent overlapping ProcessPendingJobs executions
+	var jobMu sync.Mutex
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done() // Ensure Done runs after any in-flight ProcessPendingJobs completes
+
 		// Process pending jobs immediately on startup
+		jobMu.Lock()
 		if err := printSvc.ProcessPendingJobs(ctx); err != nil {
 			logger.Error("failed to process pending print jobs on startup", "error", err)
 		}
+		jobMu.Unlock()
 
 		ticker := time.NewTicker(cfg.Print.JobInterval)
 		defer ticker.Stop()
@@ -106,13 +217,23 @@ func main() {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				// Skip this tick if previous job is still running
+				if !jobMu.TryLock() {
+					logger.Debug("skipping print job tick, previous job still running")
+					continue
+				}
 				if err := printSvc.ProcessPendingJobs(ctx); err != nil {
 					logger.Error("failed to process pending print jobs", "error", err)
 				}
+				jobMu.Unlock()
 			}
 		}
 	}()
 
+	return cancel, &wg
+}
+
+func startServer(server *http.Server, logger *slog.Logger) chan error {
 	// Error channel for server listen errors
 	serverErrCh := make(chan error, 1)
 
@@ -125,6 +246,10 @@ func main() {
 		}
 	}()
 
+	return serverErrCh
+}
+
+func waitForShutdown(server *http.Server, db *sql.DB, cancel context.CancelFunc, bgWg *sync.WaitGroup, serverErrCh chan error, logger *slog.Logger, cfg *config.Config) int {
 	// Wait for interrupt signal or server error
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
@@ -140,11 +265,14 @@ func main() {
 
 	logger.Info("shutting down server...")
 
-	// Cancel background jobs
+	// Cancel background jobs and wait for them to finish before closing DB
 	cancel()
+	logger.Debug("waiting for background jobs to complete...")
+	bgWg.Wait()
+	logger.Debug("background jobs completed")
 
 	// Graceful shutdown with timeout
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), cfg.Server.ShutdownTimeout)
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
@@ -152,30 +280,29 @@ func main() {
 		exitCode = 1
 	}
 
-	// Explicitly close database before exit
+	// Explicitly close database after background jobs have finished using it
 	if err := db.Close(); err != nil {
 		logger.Error("database close error", "error", err)
 	}
 
 	logger.Info("server stopped")
 
-	if exitCode != 0 {
-		os.Exit(exitCode)
-	}
+	return exitCode
 }
 
 // parseLogLevel parses a log level string into slog.Level
-func parseLogLevel(level string) slog.Level {
+// Returns the level and true if recognized, or LevelInfo and false if unknown
+func parseLogLevel(level string) (slog.Level, bool) {
 	switch strings.ToLower(level) {
 	case "debug":
-		return slog.LevelDebug
+		return slog.LevelDebug, true
 	case "info":
-		return slog.LevelInfo
+		return slog.LevelInfo, true
 	case "warn", "warning":
-		return slog.LevelWarn
+		return slog.LevelWarn, true
 	case "error":
-		return slog.LevelError
+		return slog.LevelError, true
 	default:
-		return slog.LevelInfo
+		return slog.LevelInfo, false
 	}
 }

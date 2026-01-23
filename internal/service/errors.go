@@ -13,6 +13,9 @@ var (
 	// ErrCustomerNotFound indicates the customer was not found
 	ErrCustomerNotFound = errors.New("customer not found")
 
+	// ErrDuplicateCustomer indicates a customer with the same code already exists
+	ErrDuplicateCustomer = errors.New("customer with this code already exists")
+
 	// ErrServiceNotFound indicates the service was not found
 	ErrServiceNotFound = errors.New("service not found")
 

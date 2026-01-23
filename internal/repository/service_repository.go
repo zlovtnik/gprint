@@ -93,6 +93,28 @@ func (r *ServiceRepository) GetByID(ctx context.Context, tenantID string, id int
 	return &s, nil
 }
 
+// serviceListAllowedSorts defines valid sort columns for service listing
+var serviceListAllowedSorts = map[string]bool{
+	"name":         true,
+	"service_code": true,
+	"category":     true,
+	"unit_price":   true,
+	"created_at":   true,
+}
+
+// getServiceSortClause returns validated sort column and direction
+func getServiceSortClause(sortBy, sortDir string) (string, string) {
+	col := "created_at"
+	if sortBy != "" && serviceListAllowedSorts[sortBy] {
+		col = sortBy
+	}
+	dir := "DESC"
+	if strings.ToUpper(sortDir) == "ASC" {
+		dir = "ASC"
+	}
+	return col, dir
+}
+
 // List retrieves services with pagination
 func (r *ServiceRepository) List(ctx context.Context, tenantID string, params models.PaginationParams, search models.SearchParams) ([]models.Service, int, error) {
 	// Count query
@@ -107,13 +129,8 @@ func (r *ServiceRepository) List(ctx context.Context, tenantID string, params mo
 	}
 
 	if search.Active != nil {
-		activeVal := 0
-		if *search.Active {
-			activeVal = 1
-		}
 		countQuery += fmt.Sprintf(" AND active = :%d", argIndex)
-		args = append(args, activeVal)
-		argIndex++
+		args = append(args, boolToInt(*search.Active))
 	}
 
 	var total int
@@ -141,27 +158,13 @@ func (r *ServiceRepository) List(ctx context.Context, tenantID string, params mo
 	}
 
 	if search.Active != nil {
-		activeVal := 0
-		if *search.Active {
-			activeVal = 1
-		}
 		query += fmt.Sprintf(" AND active = :%d", queryArgIndex)
-		queryArgs = append(queryArgs, activeVal)
+		queryArgs = append(queryArgs, boolToInt(*search.Active))
 		queryArgIndex++
 	}
 
 	// Sorting
-	sortBy := "created_at"
-	if search.SortBy != "" {
-		allowedSorts := map[string]bool{"name": true, "service_code": true, "category": true, "unit_price": true, "created_at": true}
-		if allowedSorts[search.SortBy] {
-			sortBy = search.SortBy
-		}
-	}
-	sortDir := "DESC"
-	if strings.ToUpper(search.SortDir) == "ASC" {
-		sortDir = "ASC"
-	}
+	sortBy, sortDir := getServiceSortClause(search.SortBy, search.SortDir)
 	query += fmt.Sprintf(" ORDER BY %s %s", sortBy, sortDir)
 
 	// Pagination

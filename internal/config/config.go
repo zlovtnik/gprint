@@ -25,11 +25,13 @@ type PrintConfig struct {
 
 // ServerConfig holds server-related configuration
 type ServerConfig struct {
-	Host         string
-	Port         string
-	ReadTimeout  time.Duration
-	WriteTimeout time.Duration
-	IdleTimeout  time.Duration
+	Host            string
+	Port            string
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
+	IdleTimeout     time.Duration
+	MaxHeaderBytes  int
+	ShutdownTimeout time.Duration
 }
 
 // JWTConfig holds JWT-related configuration
@@ -48,11 +50,13 @@ type AuthConfig struct {
 func Load() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Host:         getEnvOrDefault("SERVER_HOST", "0.0.0.0"),
-			Port:         getEnvOrDefault("SERVER_PORT", "8080"),
-			ReadTimeout:  getDurationOrDefault("SERVER_READ_TIMEOUT", 15*time.Second),
-			WriteTimeout: getDurationOrDefault("SERVER_WRITE_TIMEOUT", 15*time.Second),
-			IdleTimeout:  getDurationOrDefault("SERVER_IDLE_TIMEOUT", 60*time.Second),
+			Host:            getEnvOrDefault("SERVER_HOST", "0.0.0.0"),
+			Port:            getEnvOrDefault("SERVER_PORT", "8080"),
+			ReadTimeout:     getDurationOrDefault("SERVER_READ_TIMEOUT", 15*time.Second),
+			WriteTimeout:    getDurationOrDefault("SERVER_WRITE_TIMEOUT", 15*time.Second),
+			IdleTimeout:     getDurationOrDefault("SERVER_IDLE_TIMEOUT", 60*time.Second),
+			MaxHeaderBytes:  getIntOrDefault("SERVER_MAX_HEADER_BYTES", 1<<20), // 1MB default
+			ShutdownTimeout: getDurationOrDefault("SERVER_SHUTDOWN_TIMEOUT", 30*time.Second),
 		},
 		Database: OracleConfig{
 			Host:         getEnvOrDefault("ORACLE_HOST", "localhost"),

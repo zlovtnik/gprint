@@ -19,7 +19,11 @@ type CustomerHandler struct {
 }
 
 // NewCustomerHandler creates a new CustomerHandler
+// Panics if svc is nil to fail fast on misconfiguration
 func NewCustomerHandler(svc *service.CustomerService) *CustomerHandler {
+	if svc == nil {
+		panic("NewCustomerHandler: svc (CustomerService) must not be nil")
+	}
 	return &CustomerHandler{svc: svc}
 }
 
@@ -56,12 +60,12 @@ func (h *CustomerHandler) Get(w http.ResponseWriter, r *http.Request) {
 
 	customer, err := h.svc.GetByID(r.Context(), tenantID, id)
 	if err != nil {
-		log.Printf("failed to retrieve customer (id=%d, tenant=%s): %v", id, tenantID, err)
+		if errors.Is(err, service.ErrCustomerNotFound) {
+			writeError(w, http.StatusNotFound, ErrCodeNotFound, MsgCustomerNotFound)
+			return
+		}
+		log.Printf("failed to retrieve customer (id=%d): %v", id, err)
 		writeError(w, http.StatusInternalServerError, ErrCodeInternalError, MsgFailedToRetrieveCustomer)
-		return
-	}
-	if customer == nil {
-		writeError(w, http.StatusNotFound, ErrCodeNotFound, MsgCustomerNotFound)
 		return
 	}
 
@@ -79,13 +83,17 @@ func (h *CustomerHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Name == "" || req.CustomerCode == "" {
-		writeError(w, http.StatusBadRequest, ErrCodeValidationErr, "name and customer_code are required")
+	if strings.TrimSpace(req.Name) == "" || strings.TrimSpace(req.CustomerCode) == "" {
+		writeError(w, http.StatusBadRequest, ErrCodeValidationErr, "name and customer_code are required and cannot be whitespace-only")
 		return
 	}
 
 	customer, err := h.svc.Create(r.Context(), tenantID, &req, user)
 	if err != nil {
+		if errors.Is(err, service.ErrDuplicateCustomer) {
+			writeError(w, http.StatusConflict, "CONFLICT", "customer with this code already exists")
+			return
+		}
 		log.Printf("failed to create customer: %v", err)
 		writeError(w, http.StatusInternalServerError, ErrCodeInternalError, MsgInternalServerError)
 		return
@@ -144,7 +152,7 @@ func (h *CustomerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, models.SuccessResponse(nil))
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // Helper functions
@@ -169,10 +177,17 @@ func parsePagination(r *http.Request) models.PaginationParams {
 
 func parseSearchParams(r *http.Request) models.SearchParams {
 	params := models.SearchParams{
-		Query:   r.URL.Query().Get("q"),
-		Field:   r.URL.Query().Get("field"),
-		SortBy:  r.URL.Query().Get("sort_by"),
-		SortDir: r.URL.Query().Get("sort_dir"),
+		Query:  r.URL.Query().Get("q"),
+		Field:  r.URL.Query().Get("field"),
+		SortBy: r.URL.Query().Get("sort_by"),
+	}
+
+	// Validate and normalize sort_dir to only accept "asc" or "desc"
+	sortDir := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sort_dir")))
+	if sortDir == "asc" || sortDir == "desc" {
+		params.SortDir = sortDir
+	} else {
+		params.SortDir = "" // Default to empty for invalid values
 	}
 
 	if active := r.URL.Query().Get("active"); active != "" {

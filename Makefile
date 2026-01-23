@@ -1,4 +1,4 @@
-.PHONY: build run test clean docker-build docker-run lint fmt deps
+.PHONY: build build-fast run test clean docker-build docker-run lint fmt deps
 
 # Binary name
 BINARY=gprint
@@ -16,6 +16,7 @@ GOLINT=golangci-lint
 
 # Build flags
 LDFLAGS=-ldflags "-s -w"
+BUILDFLAGS=-trimpath $(LDFLAGS)
 
 # Default target
 all: deps lint test build
@@ -28,20 +29,35 @@ deps:
 # Build the application
 build:
 	@mkdir -p bin
-	$(GOBUILD) $(LDFLAGS) -o bin/$(BINARY) $(MAIN_PATH)
+	$(GOBUILD) $(BUILDFLAGS) -o bin/$(BINARY) $(MAIN_PATH)
+
+# Fast build for development (skip optimizations)
+build-fast:
+	@mkdir -p bin
+	$(GOBUILD) -o bin/$(BINARY) $(MAIN_PATH)
 
 # Build for Linux (for Docker)
 build-linux:
 	@mkdir -p bin
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) $(LDFLAGS) -o bin/$(BINARY)-linux $(MAIN_PATH)
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GOBUILD) $(BUILDFLAGS) -o bin/$(BINARY)-linux $(MAIN_PATH)
 
-# Run the application
+# Load .env file and run the application
 run:
-	DYLD_LIBRARY_PATH=$(CURDIR)/lib TNS_ADMIN=$(CURDIR)/wallet $(GORUN) $(MAIN_PATH)
+	@if [ -f .env ]; then \
+		export $$(grep -v '^#' .env | xargs) && \
+		DYLD_LIBRARY_PATH=$(CURDIR)/lib TNS_ADMIN=$(CURDIR)/wallet $(GORUN) $(MAIN_PATH); \
+	else \
+		DYLD_LIBRARY_PATH=$(CURDIR)/lib TNS_ADMIN=$(CURDIR)/wallet $(GORUN) $(MAIN_PATH); \
+	fi
 
 # Run with hot reload (requires air: go install github.com/cosmtrek/air@latest)
 dev:
-	air
+	@if [ -f .env ]; then \
+		export $$(grep -v '^#' .env | xargs) && \
+		DYLD_LIBRARY_PATH=$(CURDIR)/lib TNS_ADMIN=$(CURDIR)/wallet air; \
+	else \
+		DYLD_LIBRARY_PATH=$(CURDIR)/lib TNS_ADMIN=$(CURDIR)/wallet air; \
+	fi
 
 # Run tests
 test:

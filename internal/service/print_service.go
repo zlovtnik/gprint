@@ -143,7 +143,7 @@ func (s *PrintService) processJob(ctx context.Context, job *models.ContractPrint
 				"update_error", err2.Error(),
 			)
 		}
-		return fmt.Errorf(errMsg)
+		return fmt.Errorf("%s", errMsg)
 	}
 
 	// Generate document
@@ -204,10 +204,10 @@ func (s *PrintService) generateDocument(contract *models.Contract, format models
 			return "", 0, 0, fmt.Errorf("failed to write HTML: %w", err)
 		}
 	case models.PrintFormatPDF:
-		// TODO: Implement proper PDF conversion using wkhtmltopdf or chromedp
+		// NOTE: PDF conversion requires external dependency (wkhtmltopdf or chromedp)
 		return "", 0, 0, fmt.Errorf("%w: PDF export not implemented", ErrFormatNotSupported)
 	case models.PrintFormatDOCX:
-		// TODO: Implement proper DOCX conversion using unioffice
+		// NOTE: DOCX conversion requires external dependency (unioffice)
 		return "", 0, 0, fmt.Errorf("%w: DOCX export not implemented", ErrFormatNotSupported)
 	default:
 		return "", 0, 0, fmt.Errorf("%w: unrecognized format %s", ErrFormatNotSupported, format)
@@ -298,10 +298,10 @@ func (s *PrintService) generateHTML(contract *models.Contract) string {
             <td>R$ %.2f</td>
         </tr>`,
 			escapedDesc,
-			item.Quantity,
-			item.UnitPrice,
-			item.DiscountPct,
-			item.LineTotal,
+			item.Quantity.InexactFloat64(),
+			item.UnitPrice.InexactFloat64(),
+			item.DiscountPct.InexactFloat64(),
+			item.LineTotal.InexactFloat64(),
 		)
 	}
 
@@ -315,7 +315,7 @@ func (s *PrintService) generateHTML(contract *models.Contract) string {
     </div>
 </body>
 </html>`,
-		contract.TotalValue,
+		contract.TotalValue.InexactFloat64(),
 		escapedTermsConditions,
 	)
 

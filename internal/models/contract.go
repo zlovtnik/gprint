@@ -1,6 +1,10 @@
 package models
 
-import "time"
+import (
+	"time"
+
+	"github.com/shopspring/decimal"
+)
 
 // ContractType represents the type of contract
 type ContractType string
@@ -35,31 +39,31 @@ const (
 
 // Contract represents a service contract
 type Contract struct {
-	ID              int64          `json:"id"`
-	TenantID        string         `json:"tenant_id"`
-	ContractNumber  string         `json:"contract_number"`
-	ContractType    ContractType   `json:"contract_type"`
-	CustomerID      int64          `json:"customer_id"`
-	Customer        *Customer      `json:"customer,omitempty"`
-	StartDate       time.Time      `json:"start_date"`
-	EndDate         *time.Time     `json:"end_date,omitempty"`
-	DurationMonths  int            `json:"duration_months,omitempty"`
-	AutoRenew       bool           `json:"auto_renew"`
-	TotalValue      float64        `json:"total_value"`
-	PaymentTerms    string         `json:"payment_terms,omitempty"`
-	BillingCycle    BillingCycle   `json:"billing_cycle"`
-	Status          ContractStatus `json:"status"`
-	SignedAt        *time.Time     `json:"signed_at,omitempty"`
-	SignedBy        string         `json:"signed_by,omitempty"`
-	DocumentPath    string         `json:"document_path,omitempty"`
-	DocumentHash    string         `json:"document_hash,omitempty"`
-	Notes           string         `json:"notes,omitempty"`
-	TermsConditions string         `json:"terms_conditions,omitempty"`
-	Items           []ContractItem `json:"items,omitempty"`
-	CreatedAt       time.Time      `json:"created_at"`
-	UpdatedAt       time.Time      `json:"updated_at"`
-	CreatedBy       string         `json:"created_by,omitempty"`
-	UpdatedBy       string         `json:"updated_by,omitempty"`
+	ID              int64           `json:"id"`
+	TenantID        string          `json:"tenant_id"`
+	ContractNumber  string          `json:"contract_number"`
+	ContractType    ContractType    `json:"contract_type"`
+	CustomerID      int64           `json:"customer_id"`
+	Customer        *Customer       `json:"customer,omitempty"`
+	StartDate       time.Time       `json:"start_date"`
+	EndDate         *time.Time      `json:"end_date,omitempty"`
+	DurationMonths  int             `json:"duration_months,omitempty"`
+	AutoRenew       bool            `json:"auto_renew"`
+	TotalValue      decimal.Decimal `json:"total_value"`
+	PaymentTerms    string          `json:"payment_terms,omitempty"`
+	BillingCycle    BillingCycle    `json:"billing_cycle"`
+	Status          ContractStatus  `json:"status"`
+	SignedAt        *time.Time      `json:"signed_at,omitempty"`
+	SignedBy        string          `json:"signed_by,omitempty"`
+	DocumentPath    string          `json:"document_path,omitempty"`
+	DocumentHash    string          `json:"document_hash,omitempty"`
+	Notes           string          `json:"notes,omitempty"`
+	TermsConditions string          `json:"terms_conditions,omitempty"`
+	Items           []ContractItem  `json:"items,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+	CreatedBy       string          `json:"created_by,omitempty"`
+	UpdatedBy       string          `json:"updated_by,omitempty"`
 }
 
 // ContractItemStatus represents the status of a contract item
@@ -79,10 +83,10 @@ type ContractItem struct {
 	ContractID   int64              `json:"contract_id"`
 	ServiceID    int64              `json:"service_id"`
 	Service      *Service           `json:"service,omitempty"`
-	Quantity     float64            `json:"quantity"`
-	UnitPrice    float64            `json:"unit_price"`
-	DiscountPct  float64            `json:"discount_pct"`
-	LineTotal    float64            `json:"line_total"`
+	Quantity     decimal.Decimal    `json:"quantity"`
+	UnitPrice    decimal.Decimal    `json:"unit_price"`
+	DiscountPct  decimal.Decimal    `json:"discount_pct"`
+	LineTotal    decimal.Decimal    `json:"line_total"`
 	StartDate    *time.Time         `json:"start_date,omitempty"`
 	EndDate      *time.Time         `json:"end_date,omitempty"`
 	DeliveryDate *time.Time         `json:"delivery_date,omitempty"`
@@ -96,31 +100,31 @@ type ContractItem struct {
 
 // CreateContractRequest represents the request to create a contract
 type CreateContractRequest struct {
-	ContractNumber  string                      `json:"contract_number"`
-	ContractType    ContractType                `json:"contract_type"`
-	CustomerID      int64                       `json:"customer_id"`
-	StartDate       time.Time                   `json:"start_date"`
+	ContractNumber  string                      `json:"contract_number" validate:"required,max=50"`
+	ContractType    ContractType                `json:"contract_type" validate:"required,oneof=SERVICE RECURRING PROJECT"`
+	CustomerID      int64                       `json:"customer_id" validate:"required,gt=0"`
+	StartDate       time.Time                   `json:"start_date" validate:"required"`
 	EndDate         *time.Time                  `json:"end_date,omitempty"`
-	DurationMonths  int                         `json:"duration_months,omitempty"`
+	DurationMonths  int                         `json:"duration_months,omitempty" validate:"omitempty,gte=0"`
 	AutoRenew       bool                        `json:"auto_renew"`
 	PaymentTerms    string                      `json:"payment_terms,omitempty"`
-	BillingCycle    BillingCycle                `json:"billing_cycle,omitempty"`
+	BillingCycle    BillingCycle                `json:"billing_cycle,omitempty" validate:"omitempty,oneof=MONTHLY QUARTERLY YEARLY ONCE"`
 	Notes           string                      `json:"notes,omitempty"`
 	TermsConditions string                      `json:"terms_conditions,omitempty"`
-	Items           []CreateContractItemRequest `json:"items,omitempty"`
+	Items           []CreateContractItemRequest `json:"items,omitempty" validate:"dive"`
 }
 
 // CreateContractItemRequest represents the request to create a contract item
 type CreateContractItemRequest struct {
-	ServiceID    int64      `json:"service_id"`
-	Quantity     float64    `json:"quantity"`
-	UnitPrice    float64    `json:"unit_price"`
-	DiscountPct  float64    `json:"discount_pct,omitempty"`
-	StartDate    *time.Time `json:"start_date,omitempty"`
-	EndDate      *time.Time `json:"end_date,omitempty"`
-	DeliveryDate *time.Time `json:"delivery_date,omitempty"`
-	Description  string     `json:"description,omitempty"`
-	Notes        string     `json:"notes,omitempty"`
+	ServiceID    int64           `json:"service_id" validate:"required,gt=0"`
+	Quantity     decimal.Decimal `json:"quantity" validate:"required"`
+	UnitPrice    decimal.Decimal `json:"unit_price" validate:"required"`
+	DiscountPct  decimal.Decimal `json:"discount_pct,omitempty"`
+	StartDate    *time.Time      `json:"start_date,omitempty"`
+	EndDate      *time.Time      `json:"end_date,omitempty"`
+	DeliveryDate *time.Time      `json:"delivery_date,omitempty"`
+	Description  string          `json:"description,omitempty"`
+	Notes        string          `json:"notes,omitempty"`
 }
 
 // UpdateContractRequest represents the request to update a contract
@@ -157,7 +161,7 @@ type ContractResponse struct {
 	EndDate        *time.Time             `json:"end_date,omitempty"`
 	DurationMonths int                    `json:"duration_months,omitempty"`
 	AutoRenew      bool                   `json:"auto_renew"`
-	TotalValue     float64                `json:"total_value"`
+	TotalValue     decimal.Decimal        `json:"total_value"`
 	BillingCycle   BillingCycle           `json:"billing_cycle"`
 	Status         ContractStatus         `json:"status"`
 	SignedAt       *time.Time             `json:"signed_at,omitempty"`
@@ -171,16 +175,20 @@ type ContractItemResponse struct {
 	ID          int64              `json:"id"`
 	ServiceID   int64              `json:"service_id"`
 	Service     *ServiceResponse   `json:"service,omitempty"`
-	Quantity    float64            `json:"quantity"`
-	UnitPrice   float64            `json:"unit_price"`
-	DiscountPct float64            `json:"discount_pct"`
-	LineTotal   float64            `json:"line_total"`
+	Quantity    decimal.Decimal    `json:"quantity"`
+	UnitPrice   decimal.Decimal    `json:"unit_price"`
+	DiscountPct decimal.Decimal    `json:"discount_pct"`
+	LineTotal   decimal.Decimal    `json:"line_total"`
 	Status      ContractItemStatus `json:"status"`
 	Description string             `json:"description,omitempty"`
 }
 
 // ToResponse converts a Contract to ContractResponse
+// Returns empty ContractResponse if receiver is nil
 func (c *Contract) ToResponse() ContractResponse {
+	if c == nil {
+		return ContractResponse{}
+	}
 	resp := ContractResponse{
 		ID:             c.ID,
 		ContractNumber: c.ContractNumber,

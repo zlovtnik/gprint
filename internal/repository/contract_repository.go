@@ -31,7 +31,7 @@ func (r *ContractRepository) Create(ctx context.Context, tenantID string, req *m
 	if err != nil {
 		return nil, fmt.Errorf(errFmtBeginTx, err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	billingCycle := req.BillingCycle
 	if billingCycle == "" {
@@ -63,13 +63,15 @@ func (r *ContractRepository) Create(ctx context.Context, tenantID string, req *m
 	// Insert contract items using decimal for precise money calculations
 	totalValue := decimal.NewFromInt(0)
 	for _, item := range req.Items {
-		quantity := decimal.NewFromFloat(item.Quantity)
-		unitPrice := decimal.NewFromFloat(item.UnitPrice)
-		discountPct := decimal.NewFromFloat(item.DiscountPct)
 		hundred := decimal.NewFromInt(100)
 		// lineTotal = quantity * unitPrice * (1 - discountPct/100)
-		lineTotal := quantity.Mul(unitPrice).Mul(hundred.Sub(discountPct)).Div(hundred)
+		lineTotal := item.Quantity.Mul(item.UnitPrice).Mul(hundred.Sub(item.DiscountPct)).Div(hundred)
 		totalValue = totalValue.Add(lineTotal)
+
+		// Convert decimal to float64 for Oracle driver
+		quantityFloat, _ := item.Quantity.Float64()
+		unitPriceFloat, _ := item.UnitPrice.Float64()
+		discountPctFloat, _ := item.DiscountPct.Float64()
 
 		itemQuery := `
 			INSERT INTO contract_items (
@@ -81,8 +83,8 @@ func (r *ContractRepository) Create(ctx context.Context, tenantID string, req *m
 			)`
 
 		_, err = tx.ExecContext(ctx, itemQuery,
-			tenantID, contractID, item.ServiceID, item.Quantity, item.UnitPrice,
-			item.DiscountPct, item.StartDate, item.EndDate, item.DeliveryDate,
+			tenantID, contractID, item.ServiceID, quantityFloat, unitPriceFloat,
+			discountPctFloat, item.StartDate, item.EndDate, item.DeliveryDate,
 			item.Description, item.Notes,
 		)
 		if err != nil {
@@ -221,6 +223,45 @@ func (r *ContractRepository) GetItems(ctx context.Context, tenantID string, cont
 	return items, nil
 }
 
+// contractListAllowedSorts defines valid sort columns for contract listing
+var contractListAllowedSorts = map[string]bool{
+	"contract_number": true,
+	"start_date":      true,
+	"status":          true,
+	"total_value":     true,
+	"created_at":      true,
+}
+
+// getSortClause returns validated sort column and direction.
+// It defensively validates defaultSort against the allowed map; if defaultSort
+// is not empty and not present in allowed, it falls back to the first allowed
+// key or "id" as a safe hard-coded column. When sortBy is valid and present
+// in allowed, it overrides the default.
+func getSortClause(sortBy, sortDir string, allowed map[string]bool, defaultSort string) (string, string) {
+	// Validate defaultSort against allowed map
+	col := defaultSort
+	if defaultSort != "" && !allowed[defaultSort] {
+		// defaultSort not in allowed map - fall back to first allowed key or "id"
+		col = "id" // safe hard-coded fallback
+		for k := range allowed {
+			col = k
+			break
+		}
+	}
+
+	// Override col when sortBy is valid and present in allowed
+	if sortBy != "" && allowed[sortBy] {
+		col = sortBy
+	}
+
+	// Determine sort direction
+	dir := "DESC"
+	if strings.ToUpper(sortDir) == "ASC" {
+		dir = "ASC"
+	}
+	return col, dir
+}
+
 // List retrieves contracts with pagination
 func (r *ContractRepository) List(ctx context.Context, tenantID string, params models.PaginationParams, search models.SearchParams) ([]models.Contract, int, error) {
 	// Count query
@@ -231,7 +272,6 @@ func (r *ContractRepository) List(ctx context.Context, tenantID string, params m
 	if search.Query != "" {
 		countQuery += fmt.Sprintf(" AND UPPER(contract_number) LIKE UPPER(:%d)", argIndex)
 		args = append(args, "%"+search.Query+"%")
-		argIndex++
 	}
 
 	var total int
@@ -260,17 +300,7 @@ func (r *ContractRepository) List(ctx context.Context, tenantID string, params m
 	}
 
 	// Sorting
-	sortBy := "created_at"
-	if search.SortBy != "" {
-		allowedSorts := map[string]bool{"contract_number": true, "start_date": true, "status": true, "total_value": true, "created_at": true}
-		if allowedSorts[search.SortBy] {
-			sortBy = search.SortBy
-		}
-	}
-	sortDir := "DESC"
-	if strings.ToUpper(search.SortDir) == "ASC" {
-		sortDir = "ASC"
-	}
+	sortBy, sortDir := getSortClause(search.SortBy, search.SortDir, contractListAllowedSorts, "created_at")
 	query += fmt.Sprintf(" ORDER BY %s %s", sortBy, sortDir)
 
 	// Pagination
@@ -416,7 +446,7 @@ func (r *ContractRepository) AddItem(ctx context.Context, tenantID string, contr
 	if err != nil {
 		return nil, fmt.Errorf(errFmtBeginTx, err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	itemQuery := `
 		INSERT INTO contract_items (
@@ -510,7 +540,7 @@ func (r *ContractRepository) DeleteItem(ctx context.Context, tenantID string, co
 	if err != nil {
 		return fmt.Errorf(errFmtBeginTx, err)
 	}
-	defer tx.Rollback()
+	defer func() { _ = tx.Rollback() }()
 
 	result, err := tx.ExecContext(ctx, `DELETE FROM contract_items WHERE tenant_id = :1 AND contract_id = :2 AND id = :3`, tenantID, contractID, itemID)
 	if err != nil {

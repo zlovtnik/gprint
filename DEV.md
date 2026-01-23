@@ -4,7 +4,7 @@
 
 **Version:** 1.0.0  
 **Date:** January 22, 2026  
-**Status:** Draft
+**Status:** In Progress (8/10 items complete)
 
 ---
 
@@ -21,11 +21,11 @@ This document specifies a Go (Golang) backend microservice for **contract printi
 
 ### 1.2 Integration Points
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| Authentication | Rust/Actix-Web (JWT) | Login/Logout/User Management |
-| Database | Oracle | Contract/Services/Customers data |
-| Contract Printing | Go service | PDF/Document generation |
+|Component|Technology|Purpose|
+|----------|----------|-------|
+|Authentication|Rust/Actix-Web (JWT)|Login/Logout/User Management|
+|Database|Oracle|Contract/Services/Customers data|
+|Contract Printing|Go service|PDF/Document generation|
 
 ---
 
@@ -49,29 +49,30 @@ The Rust backend issues JWTs with the following claims:
 
 ### 2.2 JWT Signing
 
-| Parameter | Value |
-|-----------|-------|
-| Algorithm | HS256 (HMAC-SHA256) |
-| Secret Key | Loaded from `JWT_SECRET` env var or `secret.key` file |
+|Parameter|Value|
+|---------|-----|
+|Algorithm|HS256 (HMAC-SHA256)|
+|Secret Key|Loaded from `JWT_SECRET` env var or `secret.key` file|
 
 ### 2.3 Authentication Endpoints (Rust Backend)
 
 The Go microservice should **delegate** authentication to these existing endpoints:
 
-| Method | Endpoint | Description | Request Body |
-|--------|----------|-------------|--------------|
-| POST | `/api/auth/signup` | User registration | `SignupDTO` |
-| POST | `/api/auth/login` | User login (returns JWT) | `LoginDTO` |
-| POST | `/api/auth/logout` | Invalidate session | Bearer token header |
-| POST | `/api/auth/refresh` | Refresh access token | `RefreshTokenRequest` |
-| POST | `/api/auth/refresh-token` | Alternative refresh endpoint | `RefreshTokenRequest` |
-| GET | `/api/auth/me` | Get current user info | Bearer token header |
-| GET | `/api/auth/login/keycloak` | Keycloak OAuth2 redirect | - |
-| POST | `/api/auth/callback/keycloak` | Keycloak OAuth2 callback | `KeycloakCallbackRequest` |
+|Method|Endpoint|Description|Request Body|
+|------|--------|-----------|------------|
+|POST|`/api/auth/signup`|User registration|`SignupDTO`|
+|POST|`/api/auth/login`|User login (returns JWT)|`LoginDTO`|
+|POST|`/api/auth/logout`|Invalidate session|Bearer token header|
+|POST|`/api/auth/refresh`|Refresh access token|`RefreshTokenRequest`|
+|POST|`/api/auth/refresh-token`|Alternative refresh endpoint|`RefreshTokenRequest`|
+|GET|`/api/auth/me`|Get current user info|Bearer token header|
+|GET|`/api/auth/login/keycloak`|Keycloak OAuth2 redirect|-|
+|POST|`/api/auth/callback/keycloak`|Keycloak OAuth2 callback|`KeycloakCallbackRequest`|
 
 ### 2.4 Data Transfer Objects (DTOs)
 
 #### SignupDTO
+
 ```go
 type SignupDTO struct {
     Username  string `json:"username" validate:"required,min=3,max=50"`
@@ -82,6 +83,7 @@ type SignupDTO struct {
 ```
 
 #### LoginDTO
+
 ```go
 type LoginDTO struct {
     UsernameOrEmail string `json:"username_or_email" validate:"required"`
@@ -91,6 +93,7 @@ type LoginDTO struct {
 ```
 
 #### LoginInfoDTO (Response)
+
 ```go
 type LoginInfoDTO struct {
     Username     string `json:"username"`
@@ -100,6 +103,7 @@ type LoginInfoDTO struct {
 ```
 
 #### TokenBodyResponse (Login Response)
+
 ```go
 type TokenBodyResponse struct {
     AccessToken  string `json:"access_token"`
@@ -109,6 +113,7 @@ type TokenBodyResponse struct {
 ```
 
 #### RefreshTokenRequest
+
 ```go
 type RefreshTokenRequest struct {
     RefreshToken string `json:"refresh_token" validate:"required"`
@@ -216,6 +221,7 @@ func AuthMiddleware(next http.Handler) http.Handler {
 **CRITICAL**: Tenant context is server-derived, never trust client-supplied tenant IDs.
 
 The Go microservice must:
+
 1. Extract `tenant_id` from validated JWT claims
 2. Use tenant ID to scope all database queries
 3. Never allow cross-tenant data access
@@ -798,61 +804,61 @@ type CreateItemDTO struct {
 
 ### 5.1 Customers API
 
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| GET | `/api/v1/customers` | List customers (paginated) | ✓ |
-| GET | `/api/v1/customers/{id}` | Get customer by ID | ✓ |
-| POST | `/api/v1/customers` | Create customer | ✓ |
-| PUT | `/api/v1/customers/{id}` | Update customer | ✓ |
-| DELETE | `/api/v1/customers/{id}` | Soft delete customer | ✓ |
-| GET | `/api/v1/customers/search` | Search customers | ✓ |
+|Method|Endpoint|Description|Auth|
+|------|--------|-----------|----|
+|GET|`/api/v1/customers`|List customers (paginated)|✓|
+|GET|`/api/v1/customers/{id}`|Get customer by ID|✓|
+|POST|`/api/v1/customers`|Create customer|✓|
+|PUT|`/api/v1/customers/{id}`|Update customer|✓|
+|DELETE|`/api/v1/customers/{id}`|Soft delete customer|✓|
+|GET|`/api/v1/customers/search`|Search customers|✓|
 
 ### 5.2 Services API
 
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| GET | `/api/v1/services` | List services (paginated) | ✓ |
-| GET | `/api/v1/services/{id}` | Get service by ID | ✓ |
-| POST | `/api/v1/services` | Create service | ✓ |
-| PUT | `/api/v1/services/{id}` | Update service | ✓ |
-| DELETE | `/api/v1/services/{id}` | Soft delete service | ✓ |
-| GET | `/api/v1/services/categories` | List service categories | ✓ |
+|Method|Endpoint|Description|Auth|
+|------|--------|-----------|----|
+|GET|`/api/v1/services`|List services (paginated)|✓|
+|GET|`/api/v1/services/{id}`|Get service by ID|✓|
+|POST|`/api/v1/services`|Create service|✓|
+|PUT|`/api/v1/services/{id}`|Update service|✓|
+|DELETE|`/api/v1/services/{id}`|Soft delete service|✓|
+|GET|`/api/v1/services/categories`|List service categories|✓|
 
 ### 5.3 Contracts API
 
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| GET | `/api/v1/contracts` | List contracts (paginated) | ✓ |
-| GET | `/api/v1/contracts/{id}` | Get contract with items | ✓ |
-| POST | `/api/v1/contracts` | Create contract with items | ✓ |
-| PUT | `/api/v1/contracts/{id}` | Update contract | ✓ |
-| PATCH | `/api/v1/contracts/{id}/status` | Change contract status | ✓ |
-| DELETE | `/api/v1/contracts/{id}` | Cancel contract | ✓ |
-| POST | `/api/v1/contracts/{id}/sign` | Sign contract | ✓ |
-| GET | `/api/v1/contracts/{id}/history` | Get contract audit history | ✓ |
+|Method|Endpoint|Description|Auth|
+|------|--------|-----------|----|
+|GET|`/api/v1/contracts`|List contracts (paginated)|✓|
+|GET|`/api/v1/contracts/{id}`|Get contract with items|✓|
+|POST|`/api/v1/contracts`|Create contract with items|✓|
+|PUT|`/api/v1/contracts/{id}`|Update contract|✓|
+|PATCH|`/api/v1/contracts/{id}/status`|Change contract status|✓|
+|DELETE|`/api/v1/contracts/{id}`|Cancel contract|✓|
+|POST|`/api/v1/contracts/{id}/sign`|Sign contract|✓|
+|GET|`/api/v1/contracts/{id}/history`|Get contract audit history|✓|
 
 ### 5.4 Contract Items API
 
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| POST | `/api/v1/contracts/{id}/items` | Add item to contract | ✓ |
-| PUT | `/api/v1/contracts/{id}/items/{itemId}` | Update contract item | ✓ |
-| DELETE | `/api/v1/contracts/{id}/items/{itemId}` | Remove item from contract | ✓ |
+|Method|Endpoint|Description|Auth|
+|------|--------|-----------|----|
+|POST|`/api/v1/contracts/{id}/items`|Add item to contract|✓|
+|PUT|`/api/v1/contracts/{id}/items/{itemId}`|Update contract item|✓|
+|DELETE|`/api/v1/contracts/{id}/items/{itemId}`|Remove item from contract|✓|
 
 ### 5.5 Contract Printing API
 
-| Method | Endpoint | Description | Auth |
-|--------|----------|-------------|------|
-| POST | `/api/v1/contracts/{id}/print` | Queue contract for printing | ✓ |
-| GET | `/api/v1/contracts/{id}/print/status` | Get print job status | ✓ |
-| GET | `/api/v1/contracts/{id}/document` | Download generated document | ✓ |
-| GET | `/api/v1/print-jobs` | List print jobs | ✓ |
+|Method|Endpoint|Description|Auth|
+|------|--------|-----------|----|
+|POST|`/api/v1/contracts/{id}/print`|Queue contract for printing|✓|
+|GET|`/api/v1/contracts/{id}/print/status`|Get print job status|✓|
+|GET|`/api/v1/contracts/{id}/document`|Download generated document|✓|
+|GET|`/api/v1/print-jobs`|List print jobs|✓|
 
 ---
 
 ## 6. Project Structure
 
-```
+```text
 contract-service/
 ├── cmd/
 │   └── server/
@@ -862,8 +868,8 @@ contract-service/
 │   │   ├── config.go              # Configuration loading
 │   │   └── oracle.go              # Oracle connection
 │   ├── middleware/
-│   │   ├── auth.go                # JWT validation middleware
-│   │   ├── tenant.go              # Tenant context middleware
+│   │   ├── auth.go                # HTTP middleware: validates JWT, injects claims into context
+│   │   ├── tenant.go              # HTTP middleware: extracts tenant_id from context, enforces tenant-scoped access
 │   │   └── logging.go             # Request logging
 │   ├── handlers/
 │   │   ├── customer.go            # Customer handlers
@@ -888,7 +894,7 @@ contract-service/
 │       └── contract_template.html # Contract PDF template
 ├── pkg/
 │   ├── auth/
-│   │   └── jwt.go                 # JWT token utilities
+│   │   └── jwt.go                 # Reusable JWT utilities (ParseToken, ValidateToken, ClaimsFromToken)
 │   └── pdf/
 │       └── generator.go           # PDF generation utilities
 ├── migrations/
@@ -903,6 +909,14 @@ contract-service/
 ├── go.sum
 └── README.md
 ```
+
+### 6.1 Authentication & Authorization Separation of Concerns
+
+| Layer | File | Responsibility |
+| ----- | ---- | -------------- |
+| Reusable Auth | `pkg/auth/jwt.go` | Stateless JWT functions: `ParseToken(tokenString) (*jwt.Token, error)`, `ValidateToken(tokenString, secret) (*UserClaims, error)`, `ClaimsFromToken(token) *UserClaims`. No HTTP dependencies. |
+| HTTP Middleware | `internal/middleware/auth.go` | Thin HTTP layer: extracts Bearer token from Authorization header, calls `pkg/auth` functions, injects `UserClaims` into request context, returns 401 on failure. |
+| Tenant Middleware | `internal/middleware/tenant.go` | Extracts `tenant_id` from context (set by auth middleware), enforces tenant-scoped access by requiring valid tenant_id on all protected routes. |
 
 ---
 
@@ -969,15 +983,15 @@ require (
 
 ---
 
-## 10. Next Steps
+## 10. Implementation Status
 
-1. [ ] Set up Go project structure
-2. [ ] Configure Oracle database connection
-3. [ ] Implement JWT middleware integration
-4. [ ] Create database migrations
-5. [ ] Implement CRUD repositories
-6. [ ] Build API handlers
-7. [ ] Implement PDF generation
+1. [x] Set up Go project structure
+2. [x] Configure Oracle database connection
+3. [x] Implement JWT middleware integration
+4. [x] Create database migrations
+5. [x] Implement CRUD repositories
+6. [x] Build API handlers
+7. [x] Implement PDF generation
 8. [ ] Add integration tests
-9. [ ] Docker containerization
+9. [x] Docker containerization
 10. [ ] CI/CD pipeline setup

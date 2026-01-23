@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 
 	"github.com/zlovtnik/gprint/internal/models"
 	"github.com/zlovtnik/gprint/internal/repository"
@@ -19,12 +20,27 @@ func NewCustomerService(repo *repository.CustomerRepository) *CustomerService {
 
 // Create creates a new customer
 func (s *CustomerService) Create(ctx context.Context, tenantID string, req *models.CreateCustomerRequest, createdBy string) (*models.Customer, error) {
-	return s.repo.Create(ctx, tenantID, req, createdBy)
+	customer, err := s.repo.Create(ctx, tenantID, req, createdBy)
+	if err != nil {
+		// Detect Oracle unique constraint violation (ORA-00001)
+		if strings.Contains(err.Error(), "ORA-00001") || strings.Contains(err.Error(), "unique constraint") {
+			return nil, ErrDuplicateCustomer
+		}
+		return nil, err
+	}
+	return customer, nil
 }
 
 // GetByID retrieves a customer by ID
 func (s *CustomerService) GetByID(ctx context.Context, tenantID string, id int64) (*models.Customer, error) {
-	return s.repo.GetByID(ctx, tenantID, id)
+	customer, err := s.repo.GetByID(ctx, tenantID, id)
+	if err != nil {
+		return nil, err
+	}
+	if customer == nil {
+		return nil, ErrCustomerNotFound
+	}
+	return customer, nil
 }
 
 // List retrieves customers with pagination
