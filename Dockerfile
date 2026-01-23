@@ -60,11 +60,11 @@ RUN useradd -r -s /bin/false appuser
 # Copy binary from builder
 COPY --from=builder /app/gprint .
 
-# Copy wallet directory (will be mounted or baked in)
-COPY wallet/ /app/wallet/
-
-# Create output directory for print jobs
-RUN mkdir -p /app/output && chown -R appuser:appuser /app
+# Create wallet and output directories
+# Wallet contents should be provided via:
+# - Environment variable ORACLE_WALLET_CONTENT (base64 encoded wallet zip), or
+# - Volume mount at runtime: -v /path/to/wallet:/app/wallet
+RUN mkdir -p /app/wallet /app/output && chown -R appuser:appuser /app
 
 # Switch to non-root user
 USER appuser
