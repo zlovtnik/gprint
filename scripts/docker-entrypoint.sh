@@ -10,6 +10,13 @@ if [ -n "$WALLET_BASE64" ]; then
     rm /tmp/wallet.zip
     echo "Wallet decoded successfully"
     
+    # Fix sqlnet.ora to use container path instead of local dev path
+    if [ -f /app/wallet/sqlnet.ora ]; then
+        sed -i 's|DIRECTORY="[^"]*"|DIRECTORY="/app/wallet"|g' /app/wallet/sqlnet.ora
+        echo "Updated sqlnet.ora wallet path to /app/wallet"
+        cat /app/wallet/sqlnet.ora
+    fi
+    
     # Create symlink so Oracle client finds tnsnames.ora
     # Oracle looks in $ORACLE_HOME/network/admin by default
     mkdir -p /opt/oracle/instantclient/network/admin
