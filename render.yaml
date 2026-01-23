@@ -1,9 +1,15 @@
 services:
   - type: web
     name: gprint
-    runtime: go
-    buildCommand: go build -tags netgo -ldflags '-s -w' -o app ./cmd/server
-    startCommand: ./app
+    runtime: docker
+    dockerfilePath: ./Dockerfile
     envVars:
-      - key: GO_VERSION
-        value: "1.25.0"
+      - key: SERVER_HOST
+        value: "0.0.0.0"
+      - key: SERVER_PORT
+        value: "8080"
+      # Set these in Render dashboard (secret values):
+      # - ORACLE_USER
+      # - ORACLE_PASSWORD
+      # - ORACLE_TNS_ALIAS
+      # - JWT_SECRET

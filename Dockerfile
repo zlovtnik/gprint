@@ -1,10 +1,28 @@
-# Build stage
-FROM golang:1.22-alpine AS builder
+# Build stage - use Oracle Linux for native Oracle client compatibility
+FROM golang:1.23-bookworm AS builder
 
 WORKDIR /app
 
-# Install build dependencies
-RUN apk add --no-cache gcc musl-dev
+# Install Oracle Instant Client for build (required for godror CGO compilation)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libaio1 \
+    wget \
+    unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Download and install Oracle Instant Client Basic + SDK
+RUN mkdir -p /opt/oracle && \
+    cd /opt/oracle && \
+    wget -q https://download.oracle.com/otn_software/linux/instantclient/2370000/instantclient-basic-linux.x64-23.7.0.25.01.zip && \
+    wget -q https://download.oracle.com/otn_software/linux/instantclient/2370000/instantclient-sdk-linux.x64-23.7.0.25.01.zip && \
+    unzip -q instantclient-basic-linux.x64-23.7.0.25.01.zip && \
+    unzip -q instantclient-sdk-linux.x64-23.7.0.25.01.zip && \
+    rm -f *.zip && \
+    echo /opt/oracle/instantclient_23_7 > /etc/ld.so.conf.d/oracle-instantclient.conf && \
+    ldconfig
+
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_7
+ENV PKG_CONFIG_PATH=/opt/oracle/instantclient_23_7
 
 # Copy go mod files
 COPY go.mod go.sum ./
@@ -13,22 +31,37 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o gprint ./cmd/server
+# Build the application with CGO enabled (required for godror)
+RUN CGO_ENABLED=1 GOOS=linux go build -o gprint ./cmd/server
 
-# Runtime stage
-FROM alpine:3.19
+# Runtime stage - use slim Debian for Oracle client compatibility
+FROM debian:bookworm-slim
 
 WORKDIR /app
 
-# Install runtime dependencies (including wget for healthcheck)
-RUN apk add --no-cache ca-certificates tzdata wget
+# Install runtime dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libaio1 \
+    ca-certificates \
+    tzdata \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Oracle Instant Client from builder
+COPY --from=builder /opt/oracle/instantclient_23_7 /opt/oracle/instantclient_23_7
+RUN echo /opt/oracle/instantclient_23_7 > /etc/ld.so.conf.d/oracle-instantclient.conf && ldconfig
+
+ENV LD_LIBRARY_PATH=/opt/oracle/instantclient_23_7
+ENV TNS_ADMIN=/app/wallet
 
 # Create non-root user
-RUN adduser -D -g '' appuser
+RUN useradd -r -s /bin/false appuser
 
 # Copy binary from builder
 COPY --from=builder /app/gprint .
+
+# Copy wallet directory (will be mounted or baked in)
+COPY wallet/ /app/wallet/
 
 # Create output directory for print jobs
 RUN mkdir -p /app/output && chown -R appuser:appuser /app

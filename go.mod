@@ -1,6 +1,6 @@
 module github.com/zlovtnik/gprint
 
-go 1.25.0
+go 1.23.0
 
 require (
 	github.com/godror/godror v0.50.0
