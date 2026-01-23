@@ -43,6 +43,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     tzdata \
     wget \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy Oracle Instant Client from builder stage
@@ -58,10 +59,12 @@ RUN useradd -r -s /bin/false appuser
 # Copy binary from builder
 COPY --from=builder /app/gprint .
 
+# Copy entrypoint script
+COPY scripts/docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
 # Create wallet and output directories
-# Wallet contents should be provided via:
-# - Environment variable ORACLE_WALLET_CONTENT (base64 encoded wallet zip), or
-# - Volume mount at runtime: -v /path/to/wallet:/app/wallet
+# Wallet is decoded at runtime from WALLET_BASE64 env var
 RUN mkdir -p /app/wallet /app/output && chown -R appuser:appuser /app
 
 # Switch to non-root user
@@ -74,5 +77,6 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
 
-# Run the application
+# Use entrypoint to decode wallet, then run app
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["./gprint"]
