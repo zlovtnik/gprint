@@ -47,8 +47,6 @@ tmp/
 # Build artifacts
 dist/
 
-# Oracle Instant Client (project-specific lib folder with Oracle libraries)
-/lib/
 
 # Oracle wallet folder (contains credentials and connection info)
 /wallet/
