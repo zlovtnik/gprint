@@ -31,7 +31,11 @@ func main() {
 
 	handlers := setupHandlers(services, db)
 
-	r := setupRouter(cfg, logger, handlers)
+	r, err := setupRouter(cfg, logger, handlers)
+	if err != nil {
+		logger.Error("failed to setup router", "error", err)
+		os.Exit(1)
+	}
 
 	server := setupServer(cfg, r)
 
@@ -84,28 +88,31 @@ func setupDatabase(cfg *config.Config, logger *slog.Logger) *sql.DB {
 
 // repositories holds all repository instances
 type repositories struct {
-	customerRepo *repository.CustomerRepository
-	serviceRepo  *repository.ServiceRepository
-	contractRepo *repository.ContractRepository
-	historyRepo  *repository.HistoryRepository
-	printJobRepo *repository.PrintJobRepository
+	customerRepo           *repository.CustomerRepository
+	serviceRepo            *repository.ServiceRepository
+	contractRepo           *repository.ContractRepository
+	historyRepo            *repository.HistoryRepository
+	printJobRepo           *repository.PrintJobRepository
+	contractGenerationRepo *repository.ContractGenerationRepository
 }
 
 // services holds all service instances
 type services struct {
-	customerSvc *service.CustomerService
-	serviceSvc  *service.ServiceService
-	contractSvc *service.ContractService
-	printSvc    *service.PrintService
+	customerSvc           *service.CustomerService
+	serviceSvc            *service.ServiceService
+	contractSvc           *service.ContractService
+	printSvc              *service.PrintService
+	contractGenerationSvc *service.ContractGenerationService
 }
 
 // handlerSet holds all handler instances
 type handlerSet struct {
-	customerHandler *handlers.CustomerHandler
-	serviceHandler  *handlers.ServiceHandler
-	contractHandler *handlers.ContractHandler
-	printHandler    *handlers.PrintHandler
-	healthHandler   *handlers.HealthHandler
+	customerHandler           *handlers.CustomerHandler
+	serviceHandler            *handlers.ServiceHandler
+	contractHandler           *handlers.ContractHandler
+	contractGenerationHandler *handlers.ContractGenerationHandler
+	printHandler              *handlers.PrintHandler
+	healthHandler             *handlers.HealthHandler
 }
 
 func setupRepositories(db *sql.DB) repositories {
@@ -115,13 +122,15 @@ func setupRepositories(db *sql.DB) repositories {
 	contractRepo := repository.NewContractRepository(db)
 	historyRepo := repository.NewHistoryRepository(db)
 	printJobRepo := repository.NewPrintJobRepository(db)
+	contractGenerationRepo := repository.NewContractGenerationRepository(db)
 
 	return repositories{
-		customerRepo: customerRepo,
-		serviceRepo:  serviceRepo,
-		contractRepo: contractRepo,
-		historyRepo:  historyRepo,
-		printJobRepo: printJobRepo,
+		customerRepo:           customerRepo,
+		serviceRepo:            serviceRepo,
+		contractRepo:           contractRepo,
+		historyRepo:            historyRepo,
+		printJobRepo:           printJobRepo,
+		contractGenerationRepo: contractGenerationRepo,
 	}
 }
 
@@ -135,12 +144,14 @@ func setupServices(repos repositories, cfg *config.Config, logger *slog.Logger) 
 		logger.Error("failed to create print service", "error", err)
 		os.Exit(1)
 	}
+	contractGenerationSvc := service.NewContractGenerationService(repos.contractGenerationRepo)
 
 	return services{
-		customerSvc: customerSvc,
-		serviceSvc:  serviceSvc,
-		contractSvc: contractSvc,
-		printSvc:    printSvc,
+		customerSvc:           customerSvc,
+		serviceSvc:            serviceSvc,
+		contractSvc:           contractSvc,
+		printSvc:              printSvc,
+		contractGenerationSvc: contractGenerationSvc,
 	}
 }
 
@@ -149,30 +160,38 @@ func setupHandlers(svcs services, db *sql.DB) handlerSet {
 	customerHandler := handlers.NewCustomerHandler(svcs.customerSvc)
 	serviceHandler := handlers.NewServiceHandler(svcs.serviceSvc)
 	contractHandler := handlers.NewContractHandler(svcs.contractSvc)
+	contractGenerationHandler := handlers.NewContractGenerationHandler(svcs.contractGenerationSvc)
 	printHandler := handlers.NewPrintHandler(svcs.printSvc)
 	healthHandler := handlers.NewHealthHandler(db)
 
 	return handlerSet{
-		customerHandler: customerHandler,
-		serviceHandler:  serviceHandler,
-		contractHandler: contractHandler,
-		printHandler:    printHandler,
-		healthHandler:   healthHandler,
+		customerHandler:           customerHandler,
+		serviceHandler:            serviceHandler,
+		contractHandler:           contractHandler,
+		contractGenerationHandler: contractGenerationHandler,
+		printHandler:              printHandler,
+		healthHandler:             healthHandler,
 	}
 }
 
-func setupRouter(cfg *config.Config, logger *slog.Logger, h handlerSet) *router.Router {
+func setupRouter(cfg *config.Config, logger *slog.Logger, h handlerSet) (*router.Router, error) {
 	// Initialize router
-	r := router.NewRouter(
+	r, err := router.NewRouter(
 		cfg.JWT.Secret,
 		logger,
-		h.customerHandler,
-		h.serviceHandler,
-		h.contractHandler,
-		h.printHandler,
-		h.healthHandler,
+		router.Handlers{
+			Customer:           h.customerHandler,
+			Service:            h.serviceHandler,
+			Contract:           h.contractHandler,
+			ContractGeneration: h.contractGenerationHandler,
+			Print:              h.printHandler,
+			Health:             h.healthHandler,
+		},
 	)
-	return r
+	if err != nil {
+		return nil, err
+	}
+	return r, nil
 }
 
 func setupServer(cfg *config.Config, r *router.Router) *http.Server {

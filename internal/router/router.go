@@ -1,6 +1,7 @@
 package router
 
 import (
+	"errors"
 	"log/slog"
 	"net/http"
 
@@ -8,77 +9,107 @@ import (
 	"github.com/zlovtnik/gprint/internal/middleware"
 )
 
-// Router holds all route handlers
-type Router struct {
-	mux             *http.ServeMux
-	jwtSecret       string
-	logger          *slog.Logger
-	customerHandler *handlers.CustomerHandler
-	serviceHandler  *handlers.ServiceHandler
-	contractHandler *handlers.ContractHandler
-	printHandler    *handlers.PrintHandler
-	healthHandler   *handlers.HealthHandler
+// Handlers groups all HTTP handlers for cleaner dependency injection
+type Handlers struct {
+	Customer           *handlers.CustomerHandler
+	Service            *handlers.ServiceHandler
+	Contract           *handlers.ContractHandler
+	ContractGeneration *handlers.ContractGenerationHandler
+	Print              *handlers.PrintHandler
+	Health             *handlers.HealthHandler
 }
 
-// NewRouter creates a new Router
+// Router holds all route handlers
+type Router struct {
+	mux       *http.ServeMux
+	jwtSecret string
+	logger    *slog.Logger
+	handlers  Handlers
+}
+
+// NewRouter creates a new Router with validated handlers.
+// Returns an error if any required handler is nil.
 func NewRouter(
 	jwtSecret string,
 	logger *slog.Logger,
-	customerHandler *handlers.CustomerHandler,
-	serviceHandler *handlers.ServiceHandler,
-	contractHandler *handlers.ContractHandler,
-	printHandler *handlers.PrintHandler,
-	healthHandler *handlers.HealthHandler,
-) *Router {
-	return &Router{
-		mux:             http.NewServeMux(),
-		jwtSecret:       jwtSecret,
-		logger:          logger,
-		customerHandler: customerHandler,
-		serviceHandler:  serviceHandler,
-		contractHandler: contractHandler,
-		printHandler:    printHandler,
-		healthHandler:   healthHandler,
+	h Handlers,
+) (*Router, error) {
+	// Validate all required handlers are set
+	if h.Customer == nil {
+		return nil, errors.New("customer handler is required")
 	}
+	if h.Service == nil {
+		return nil, errors.New("service handler is required")
+	}
+	if h.Contract == nil {
+		return nil, errors.New("contract handler is required")
+	}
+	if h.ContractGeneration == nil {
+		return nil, errors.New("contract generation handler is required")
+	}
+	if h.Print == nil {
+		return nil, errors.New("print handler is required")
+	}
+	if h.Health == nil {
+		return nil, errors.New("health handler is required")
+	}
+
+	return &Router{
+		mux:       http.NewServeMux(),
+		jwtSecret: jwtSecret,
+		logger:    logger,
+		handlers:  h,
+	}, nil
 }
 
 // Setup configures all routes
 func (r *Router) Setup() http.Handler {
 	// Health endpoints (no auth required)
-	r.mux.HandleFunc("GET /health", r.healthHandler.Health)
-	r.mux.HandleFunc("GET /ready", r.healthHandler.Ready)
+	r.mux.HandleFunc("GET /health", r.handlers.Health.Health)
+	r.mux.HandleFunc("GET /ready", r.handlers.Health.Ready)
 
 	// Customer endpoints
-	r.mux.HandleFunc("GET /api/v1/customers", r.customerHandler.List)
-	r.mux.HandleFunc("GET /api/v1/customers/{id}", r.customerHandler.Get)
-	r.mux.HandleFunc("POST /api/v1/customers", r.customerHandler.Create)
-	r.mux.HandleFunc("PUT /api/v1/customers/{id}", r.customerHandler.Update)
-	r.mux.HandleFunc("DELETE /api/v1/customers/{id}", r.customerHandler.Delete)
+	r.mux.HandleFunc("GET /api/v1/customers", r.handlers.Customer.List)
+	r.mux.HandleFunc("GET /api/v1/customers/{id}", r.handlers.Customer.Get)
+	r.mux.HandleFunc("POST /api/v1/customers", r.handlers.Customer.Create)
+	r.mux.HandleFunc("PUT /api/v1/customers/{id}", r.handlers.Customer.Update)
+	r.mux.HandleFunc("DELETE /api/v1/customers/{id}", r.handlers.Customer.Delete)
 
 	// Service endpoints
-	r.mux.HandleFunc("GET /api/v1/services", r.serviceHandler.List)
-	r.mux.HandleFunc("GET /api/v1/services/categories", r.serviceHandler.GetCategories)
-	r.mux.HandleFunc("GET /api/v1/services/{id}", r.serviceHandler.Get)
-	r.mux.HandleFunc("POST /api/v1/services", r.serviceHandler.Create)
-	r.mux.HandleFunc("PUT /api/v1/services/{id}", r.serviceHandler.Update)
-	r.mux.HandleFunc("DELETE /api/v1/services/{id}", r.serviceHandler.Delete)
+	r.mux.HandleFunc("GET /api/v1/services", r.handlers.Service.List)
+	r.mux.HandleFunc("GET /api/v1/services/categories", r.handlers.Service.GetCategories)
+	r.mux.HandleFunc("GET /api/v1/services/{id}", r.handlers.Service.Get)
+	r.mux.HandleFunc("POST /api/v1/services", r.handlers.Service.Create)
+	r.mux.HandleFunc("PUT /api/v1/services/{id}", r.handlers.Service.Update)
+	r.mux.HandleFunc("DELETE /api/v1/services/{id}", r.handlers.Service.Delete)
 
 	// Contract endpoints
-	r.mux.HandleFunc("GET /api/v1/contracts", r.contractHandler.List)
-	r.mux.HandleFunc("GET /api/v1/contracts/{id}", r.contractHandler.Get)
-	r.mux.HandleFunc("POST /api/v1/contracts", r.contractHandler.Create)
-	r.mux.HandleFunc("PUT /api/v1/contracts/{id}", r.contractHandler.Update)
-	r.mux.HandleFunc("PATCH /api/v1/contracts/{id}/status", r.contractHandler.UpdateStatus)
-	r.mux.HandleFunc("POST /api/v1/contracts/{id}/sign", r.contractHandler.Sign)
-	r.mux.HandleFunc("GET /api/v1/contracts/{id}/history", r.contractHandler.GetHistory)
-	r.mux.HandleFunc("POST /api/v1/contracts/{id}/items", r.contractHandler.AddItem)
-	r.mux.HandleFunc("DELETE /api/v1/contracts/{id}/items/{itemId}", r.contractHandler.DeleteItem)
+	r.mux.HandleFunc("GET /api/v1/contracts", r.handlers.Contract.List)
+	r.mux.HandleFunc("GET /api/v1/contracts/{id}", r.handlers.Contract.Get)
+	r.mux.HandleFunc("POST /api/v1/contracts", r.handlers.Contract.Create)
+	r.mux.HandleFunc("PUT /api/v1/contracts/{id}", r.handlers.Contract.Update)
+	r.mux.HandleFunc("PATCH /api/v1/contracts/{id}/status", r.handlers.Contract.UpdateStatus)
+	r.mux.HandleFunc("POST /api/v1/contracts/{id}/sign", r.handlers.Contract.Sign)
+	r.mux.HandleFunc("GET /api/v1/contracts/{id}/history", r.handlers.Contract.GetHistory)
+	r.mux.HandleFunc("POST /api/v1/contracts/{id}/items", r.handlers.Contract.AddItem)
+	r.mux.HandleFunc("DELETE /api/v1/contracts/{id}/items/{itemId}", r.handlers.Contract.DeleteItem)
 
 	// Print job endpoints
-	r.mux.HandleFunc("POST /api/v1/contracts/{id}/print", r.printHandler.CreateJob)
-	r.mux.HandleFunc("GET /api/v1/contracts/{id}/print-jobs", r.printHandler.GetJobsByContract)
-	r.mux.HandleFunc("GET /api/v1/print-jobs/{id}", r.printHandler.GetJob)
-	r.mux.HandleFunc("GET /api/v1/print-jobs/{id}/download", r.printHandler.Download)
+	r.mux.HandleFunc("POST /api/v1/contracts/{id}/print", r.handlers.Print.CreateJob)
+	r.mux.HandleFunc("GET /api/v1/contracts/{id}/print-jobs", r.handlers.Print.GetJobsByContract)
+	r.mux.HandleFunc("GET /api/v1/print-jobs/{id}", r.handlers.Print.GetJob)
+	r.mux.HandleFunc("GET /api/v1/print-jobs/{id}/download", r.handlers.Print.Download)
+
+	// Contract generation endpoints (all processing happens in PL/SQL for security)
+	r.mux.HandleFunc("POST /api/v1/contracts/{id}/generate", r.handlers.ContractGeneration.Generate)
+	r.mux.HandleFunc("GET /api/v1/contracts/{id}/generated", r.handlers.ContractGeneration.ListGenerated)
+	r.mux.HandleFunc("GET /api/v1/contracts/{id}/generated/latest", r.handlers.ContractGeneration.GetLatest)
+	r.mux.HandleFunc("GET /api/v1/contracts/{id}/generated/{gen_id}", r.handlers.ContractGeneration.GetContent)
+	r.mux.HandleFunc("POST /api/v1/contracts/{id}/generated/{gen_id}/log/download", r.handlers.ContractGeneration.LogDownload)
+	r.mux.HandleFunc("POST /api/v1/contracts/{id}/generated/{gen_id}/log/print", r.handlers.ContractGeneration.LogPrint)
+	r.mux.HandleFunc("GET /api/v1/contracts/{id}/generated/{gen_id}/verify", r.handlers.ContractGeneration.VerifyIntegrity)
+	r.mux.HandleFunc("GET /api/v1/contracts/generation/stats", r.handlers.ContractGeneration.GetStats)
+	r.mux.HandleFunc("GET /api/v1/contracts/templates", r.handlers.ContractGeneration.ListTemplates)
 
 	// Apply middleware stack
 	var handler http.Handler = r.mux

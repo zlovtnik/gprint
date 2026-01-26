@@ -59,9 +59,8 @@ RUN useradd -r -s /bin/false appuser
 # Copy binary from builder
 COPY --from=builder /app/gprint .
 
-# Copy entrypoint script
-COPY scripts/docker-entrypoint.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+# Copy entrypoint script and set permissions
+COPY --chmod=755 scripts/docker-entrypoint.sh /usr/local/bin/
 
 # Create wallet and output directories
 # Wallet is decoded at runtime from WALLET_BASE64 env var
