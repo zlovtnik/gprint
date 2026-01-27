@@ -54,17 +54,8 @@ func (r *PrintJobRepository) GetByID(ctx context.Context, tenantID string, id in
 		FROM contract_print_jobs
 		WHERE tenant_id = :1 AND id = :2`
 
-	var j models.ContractPrintJob
-	var outputPath, errorMessage sql.NullString
-	var fileSize, pageCount sql.NullInt64
-	var startedAt, completedAt sql.NullTime
-
-	err := r.db.QueryRowContext(ctx, query, tenantID, id).Scan(
-		&j.ID, &j.TenantID, &j.ContractID, &j.Status, &j.Format,
-		&outputPath, &fileSize, &pageCount,
-		&j.QueuedAt, &startedAt, &completedAt,
-		&j.RetryCount, &errorMessage, &j.RequestedBy,
-	)
+	row := r.db.QueryRowContext(ctx, query, tenantID, id)
+	job, err := scanPrintJob(row)
 	if err == sql.ErrNoRows {
 		return nil, nil
 	}
@@ -72,18 +63,7 @@ func (r *PrintJobRepository) GetByID(ctx context.Context, tenantID string, id in
 		return nil, fmt.Errorf("failed to get print job: %w", err)
 	}
 
-	j.OutputPath = outputPath.String
-	j.FileSize = fileSize.Int64
-	j.PageCount = int(pageCount.Int64)
-	j.ErrorMessage = errorMessage.String
-	if startedAt.Valid {
-		j.StartedAt = &startedAt.Time
-	}
-	if completedAt.Valid {
-		j.CompletedAt = &completedAt.Time
-	}
-
-	return &j, nil
+	return &job, nil
 }
 
 // GetByContractID retrieves print jobs for a contract
@@ -105,33 +85,11 @@ func (r *PrintJobRepository) GetByContractID(ctx context.Context, tenantID strin
 
 	var jobs []models.ContractPrintJob
 	for rows.Next() {
-		var j models.ContractPrintJob
-		var outputPath, errorMessage sql.NullString
-		var fileSize, pageCount sql.NullInt64
-		var startedAt, completedAt sql.NullTime
-
-		err := rows.Scan(
-			&j.ID, &j.TenantID, &j.ContractID, &j.Status, &j.Format,
-			&outputPath, &fileSize, &pageCount,
-			&j.QueuedAt, &startedAt, &completedAt,
-			&j.RetryCount, &errorMessage, &j.RequestedBy,
-		)
+		job, err := scanPrintJob(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan print job: %w", err)
 		}
-
-		j.OutputPath = outputPath.String
-		j.FileSize = fileSize.Int64
-		j.PageCount = int(pageCount.Int64)
-		j.ErrorMessage = errorMessage.String
-		if startedAt.Valid {
-			j.StartedAt = &startedAt.Time
-		}
-		if completedAt.Valid {
-			j.CompletedAt = &completedAt.Time
-		}
-
-		jobs = append(jobs, j)
+		jobs = append(jobs, job)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -171,33 +129,11 @@ func (r *PrintJobRepository) FindAll(ctx context.Context, tenantID string, offse
 
 	var jobs []models.ContractPrintJob
 	for rows.Next() {
-		var j models.ContractPrintJob
-		var outputPath, errorMessage sql.NullString
-		var fileSize, pageCount sql.NullInt64
-		var startedAt, completedAt sql.NullTime
-
-		err := rows.Scan(
-			&j.ID, &j.TenantID, &j.ContractID, &j.Status, &j.Format,
-			&outputPath, &fileSize, &pageCount,
-			&j.QueuedAt, &startedAt, &completedAt,
-			&j.RetryCount, &errorMessage, &j.RequestedBy,
-		)
+		job, err := scanPrintJob(rows)
 		if err != nil {
 			return nil, 0, fmt.Errorf("error scanning print job: %w", err)
 		}
-
-		j.OutputPath = outputPath.String
-		j.FileSize = fileSize.Int64
-		j.PageCount = int(pageCount.Int64)
-		j.ErrorMessage = errorMessage.String
-		if startedAt.Valid {
-			j.StartedAt = &startedAt.Time
-		}
-		if completedAt.Valid {
-			j.CompletedAt = &completedAt.Time
-		}
-
-		jobs = append(jobs, j)
+		jobs = append(jobs, job)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -254,33 +190,11 @@ func (r *PrintJobRepository) GetPendingJobs(ctx context.Context, limit int) ([]m
 
 	var jobs []models.ContractPrintJob
 	for rows.Next() {
-		var j models.ContractPrintJob
-		var outputPath, errorMessage sql.NullString
-		var fileSize, pageCount sql.NullInt64
-		var startedAt, completedAt sql.NullTime
-
-		err := rows.Scan(
-			&j.ID, &j.TenantID, &j.ContractID, &j.Status, &j.Format,
-			&outputPath, &fileSize, &pageCount,
-			&j.QueuedAt, &startedAt, &completedAt,
-			&j.RetryCount, &errorMessage, &j.RequestedBy,
-		)
+		job, err := scanPrintJob(rows)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan print job: %w", err)
 		}
-
-		j.OutputPath = outputPath.String
-		j.FileSize = fileSize.Int64
-		j.PageCount = int(pageCount.Int64)
-		j.ErrorMessage = errorMessage.String
-		if startedAt.Valid {
-			j.StartedAt = &startedAt.Time
-		}
-		if completedAt.Valid {
-			j.CompletedAt = &completedAt.Time
-		}
-
-		jobs = append(jobs, j)
+		jobs = append(jobs, job)
 	}
 
 	if err := rows.Err(); err != nil {
@@ -288,4 +202,37 @@ func (r *PrintJobRepository) GetPendingJobs(ctx context.Context, limit int) ([]m
 	}
 
 	return jobs, nil
+}
+
+type printJobScanner interface {
+	Scan(dest ...any) error
+}
+
+func scanPrintJob(scanner printJobScanner) (models.ContractPrintJob, error) {
+	var job models.ContractPrintJob
+	var outputPath, errorMessage sql.NullString
+	var fileSize, pageCount sql.NullInt64
+	var startedAt, completedAt sql.NullTime
+
+	if err := scanner.Scan(
+		&job.ID, &job.TenantID, &job.ContractID, &job.Status, &job.Format,
+		&outputPath, &fileSize, &pageCount,
+		&job.QueuedAt, &startedAt, &completedAt,
+		&job.RetryCount, &errorMessage, &job.RequestedBy,
+	); err != nil {
+		return models.ContractPrintJob{}, err
+	}
+
+	job.OutputPath = outputPath.String
+	job.FileSize = fileSize.Int64
+	job.PageCount = int(pageCount.Int64)
+	job.ErrorMessage = errorMessage.String
+	if startedAt.Valid {
+		job.StartedAt = &startedAt.Time
+	}
+	if completedAt.Valid {
+		job.CompletedAt = &completedAt.Time
+	}
+
+	return job, nil
 }

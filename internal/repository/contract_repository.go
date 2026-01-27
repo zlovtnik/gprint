@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -244,12 +245,8 @@ func getSortClause(sortBy, sortDir string, allowed map[string]bool, defaultSort 
 	// Validate defaultSort against allowed map
 	col := defaultSort
 	if defaultSort != "" && !allowed[defaultSort] {
-		// defaultSort not in allowed map - fall back to first allowed key or "id"
-		col = "id" // safe hard-coded fallback
-		for k := range allowed {
-			col = k
-			break
-		}
+		// defaultSort not in allowed map - fall back to deterministic column
+		col = getDeterministicFallbackSortColumn(allowed)
 	}
 
 	// Override col when sortBy is valid and present in allowed
@@ -263,6 +260,24 @@ func getSortClause(sortBy, sortDir string, allowed map[string]bool, defaultSort 
 		dir = "ASC"
 	}
 	return col, dir
+}
+
+func getDeterministicFallbackSortColumn(allowed map[string]bool) string {
+	if allowed["id"] {
+		return "id"
+	}
+	if allowed["created_at"] {
+		return "created_at"
+	}
+	keys := make([]string, 0, len(allowed))
+	for k := range allowed {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	if len(keys) > 0 {
+		return keys[0]
+	}
+	return "id"
 }
 
 // List retrieves contracts with pagination

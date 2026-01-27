@@ -40,11 +40,11 @@ func (c OracleConfig) DSN() string {
 	if c.WalletPath != "" && c.TNSAlias != "" {
 		tnsAlias := escapeDSNValue(c.TNSAlias)
 		walletPath := escapeDSNValue(c.WalletPath)
-		return fmt.Sprintf(`user="%s" password="%s" connectString="%s" configDir="%s" walletLocation="%s"`,
+		return fmt.Sprintf(`user="%s" password="%s" connectString="%s" configDir="%s" walletLocation="%s" NumberToString=1`,
 			user, password, tnsAlias, walletPath, walletPath)
 	}
 	// Standard connection string
-	return fmt.Sprintf(`user="%s" password="%s" connectString="%s:%s/%s"`,
+	return fmt.Sprintf(`user="%s" password="%s" connectString="%s:%s/%s" NumberToString=1`,
 		user, password, c.Host, c.Port, c.Service)
 }
 
