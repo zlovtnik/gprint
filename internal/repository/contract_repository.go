@@ -126,11 +126,12 @@ func (r *ContractRepository) GetByID(ctx context.Context, tenantID string, id in
 	var durationMonths sql.NullInt64
 	var signedBy, documentPath, documentHash, paymentTerms sql.NullString
 	var notes, termsConditions, createdBy, updatedBy sql.NullString
+	var totalValueFloat float64
 
 	err := r.db.QueryRowContext(ctx, query, tenantID, id).Scan(
 		&contract.ID, &contract.TenantID, &contract.ContractNumber, &contract.ContractType, &contract.CustomerID,
 		&contract.StartDate, &endDate, &durationMonths, &contract.AutoRenew,
-		&contract.TotalValue, &paymentTerms, &contract.BillingCycle, &contract.Status,
+		&totalValueFloat, &paymentTerms, &contract.BillingCycle, &contract.Status,
 		&signedAt, &signedBy, &documentPath, &documentHash,
 		&notes, &termsConditions, &contract.CreatedAt, &contract.UpdatedAt, &createdBy, &updatedBy,
 	)
@@ -141,6 +142,7 @@ func (r *ContractRepository) GetByID(ctx context.Context, tenantID string, id in
 		return nil, fmt.Errorf("failed to get contract: %w", err)
 	}
 
+	contract.TotalValue = decimal.NewFromFloat(totalValueFloat)
 	if endDate.Valid {
 		contract.EndDate = &endDate.Time
 	}
@@ -338,11 +340,12 @@ func (r *ContractRepository) List(ctx context.Context, tenantID string, params m
 		var durationMonths sql.NullInt64
 		var signedBy, documentPath, documentHash, paymentTerms sql.NullString
 		var notes, termsConditions, createdBy, updatedBy sql.NullString
+		var totalValueFloat float64
 
 		err := rows.Scan(
 			&c.ID, &c.TenantID, &c.ContractNumber, &c.ContractType, &c.CustomerID,
 			&c.StartDate, &endDate, &durationMonths, &c.AutoRenew,
-			&c.TotalValue, &paymentTerms, &c.BillingCycle, &c.Status,
+			&totalValueFloat, &paymentTerms, &c.BillingCycle, &c.Status,
 			&signedAt, &signedBy, &documentPath, &documentHash,
 			&notes, &termsConditions, &c.CreatedAt, &c.UpdatedAt, &createdBy, &updatedBy,
 		)
@@ -350,6 +353,7 @@ func (r *ContractRepository) List(ctx context.Context, tenantID string, params m
 			return nil, 0, fmt.Errorf("failed to scan contract: %w", err)
 		}
 
+		c.TotalValue = decimal.NewFromFloat(totalValueFloat)
 		if endDate.Valid {
 			c.EndDate = &endDate.Time
 		}
