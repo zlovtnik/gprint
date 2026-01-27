@@ -279,6 +279,9 @@ func getDeterministicFallbackSortColumn(allowed map[string]bool) string {
 	if len(keys) > 0 {
 		return keys[0]
 	}
+	// Empty-map fallback: return "id" as a safe default when no columns are allowed.
+	// This differs from the earlier allowed["id"] check, which only triggers when "id"
+	// is explicitly in the allowed map. This branch handles the degenerate case.
 	return "id"
 }
 

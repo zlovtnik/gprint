@@ -44,8 +44,11 @@ func (c OracleConfig) DSN() string {
 			user, password, tnsAlias, walletPath, walletPath)
 	}
 	// Standard connection string
+	host := escapeDSNValue(c.Host)
+	port := escapeDSNValue(c.Port)
+	service := escapeDSNValue(c.Service)
 	return fmt.Sprintf(`user="%s" password="%s" connectString="%s:%s/%s" NumberToString=1`,
-		user, password, c.Host, c.Port, c.Service)
+		user, password, host, port, service)
 }
 
 // NewOracleDB creates a new Oracle database connection pool
