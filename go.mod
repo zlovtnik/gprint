@@ -3,8 +3,10 @@ module github.com/zlovtnik/gprint
 go 1.23.0
 
 require (
+	github.com/IBM/fp-go v1.1.84
 	github.com/godror/godror v0.50.0
 	github.com/golang-jwt/jwt/v5 v5.3.0
+	github.com/google/uuid v1.6.0
 	github.com/shopspring/decimal v1.4.0
 )
 

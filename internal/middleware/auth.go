@@ -80,6 +80,11 @@ func GetUser(ctx context.Context) string {
 	return ""
 }
 
+// GetUserID is an alias for GetUser for API consistency
+func GetUserID(ctx context.Context) string {
+	return GetUser(ctx)
+}
+
 // GetUserClaims retrieves the full claims from context
 func GetUserClaims(ctx context.Context) *UserClaims {
 	if v := ctx.Value(contextKeyClaims); v != nil {
