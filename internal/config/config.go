@@ -13,6 +13,7 @@ type Config struct {
 	Database OracleConfig
 	JWT      JWTConfig
 	Auth     AuthConfig
+	Keycloak KeycloakConfig
 	Print    PrintConfig
 	LogLevel string
 }
@@ -45,6 +46,14 @@ type AuthConfig struct {
 	BaseURL string
 }
 
+// KeycloakConfig holds Keycloak OAuth2 configuration
+type KeycloakConfig struct {
+	BaseURL      string
+	Realm        string
+	ClientID     string
+	ClientSecret string
+}
+
 // Load loads configuration from environment variables
 // Panics if required configuration is missing
 func Load() *Config {
@@ -75,6 +84,12 @@ func Load() *Config {
 		},
 		Auth: AuthConfig{
 			BaseURL: getEnvOrDefault("AUTH_SERVICE_URL", "http://localhost:8081"),
+		},
+		Keycloak: KeycloakConfig{
+			BaseURL:      getEnvOrDefault("KEYCLOAK_URL", "http://localhost:8180"),
+			Realm:        getEnvOrDefault("KEYCLOAK_REALM", "master"),
+			ClientID:     getEnvOrDefault("KEYCLOAK_CLIENT_ID", "gprint"),
+			ClientSecret: os.Getenv("KEYCLOAK_CLIENT_SECRET"),
 		},
 		Print: PrintConfig{
 			OutputPath:  getEnvOrDefault("PRINT_OUTPUT_PATH", "./output"),

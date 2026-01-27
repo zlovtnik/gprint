@@ -5,7 +5,6 @@ import (
 	"errors"
 	"log"
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/zlovtnik/gprint/internal/middleware"
@@ -153,65 +152,4 @@ func (h *CustomerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
-}
-
-// Helper functions
-
-func parsePagination(r *http.Request) models.PaginationParams {
-	params := models.DefaultPagination()
-
-	if page := r.URL.Query().Get("page"); page != "" {
-		if p, err := strconv.Atoi(page); err == nil && p > 0 {
-			params.Page = p
-		}
-	}
-
-	if pageSize := r.URL.Query().Get("page_size"); pageSize != "" {
-		if ps, err := strconv.Atoi(pageSize); err == nil && ps > 0 && ps <= 100 {
-			params.PageSize = ps
-		}
-	}
-
-	return params
-}
-
-func parseSearchParams(r *http.Request) models.SearchParams {
-	params := models.SearchParams{
-		Query:  r.URL.Query().Get("q"),
-		Field:  r.URL.Query().Get("field"),
-		SortBy: r.URL.Query().Get("sort_by"),
-	}
-
-	// Validate and normalize sort_dir to only accept "asc" or "desc"
-	sortDir := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("sort_dir")))
-	if sortDir == "asc" || sortDir == "desc" {
-		params.SortDir = sortDir
-	} else {
-		params.SortDir = "" // Default to empty for invalid values
-	}
-
-	if active := r.URL.Query().Get("active"); active != "" {
-		b := strings.ToLower(active) == "true" || active == "1"
-		params.Active = &b
-	}
-
-	return params
-}
-
-func parseIDFromPath(r *http.Request, name string) (int64, error) {
-	idStr := r.PathValue(name)
-	return strconv.ParseInt(idStr, 10, 64)
-}
-
-func writeJSON(w http.ResponseWriter, status int, data any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		// Headers already sent, log the error
-		log.Printf("failed to encode JSON response: %v", err)
-	}
-}
-
-func writeError(w http.ResponseWriter, status int, code, message string) {
-	writeJSON(w, status, models.ErrorResponse(code, message, nil))
 }

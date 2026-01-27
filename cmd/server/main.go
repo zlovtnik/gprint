@@ -18,6 +18,7 @@ import (
 	"github.com/zlovtnik/gprint/internal/repository"
 	"github.com/zlovtnik/gprint/internal/router"
 	"github.com/zlovtnik/gprint/internal/service"
+	"github.com/zlovtnik/gprint/pkg/auth"
 )
 
 func main() {
@@ -29,7 +30,7 @@ func main() {
 
 	services := setupServices(repos, cfg, logger)
 
-	handlers := setupHandlers(services, db)
+	handlers := setupHandlers(services, db, cfg)
 
 	r, err := setupRouter(cfg, logger, handlers)
 	if err != nil {
@@ -113,6 +114,7 @@ type handlerSet struct {
 	contractGenerationHandler *handlers.ContractGenerationHandler
 	printHandler              *handlers.PrintHandler
 	healthHandler             *handlers.HealthHandler
+	authHandler               *handlers.AuthHandler
 }
 
 func setupRepositories(db *sql.DB) repositories {
@@ -155,7 +157,26 @@ func setupServices(repos repositories, cfg *config.Config, logger *slog.Logger) 
 	}
 }
 
-func setupHandlers(svcs services, db *sql.DB) handlerSet {
+func setupHandlers(svcs services, db *sql.DB, cfg *config.Config) handlerSet {
+	// Validate Keycloak configuration before creating client
+	if cfg.Keycloak.BaseURL == "" {
+		panic("KEYCLOAK_URL is required for authentication")
+	}
+	if cfg.Keycloak.Realm == "" {
+		panic("KEYCLOAK_REALM is required for authentication")
+	}
+	if cfg.Keycloak.ClientID == "" {
+		panic("KEYCLOAK_CLIENT_ID is required for authentication")
+	}
+
+	// Initialize Keycloak client
+	keycloakClient := auth.NewKeycloakClient(auth.KeycloakConfig{
+		BaseURL:      cfg.Keycloak.BaseURL,
+		Realm:        cfg.Keycloak.Realm,
+		ClientID:     cfg.Keycloak.ClientID,
+		ClientSecret: cfg.Keycloak.ClientSecret,
+	})
+
 	// Initialize handlers
 	customerHandler := handlers.NewCustomerHandler(svcs.customerSvc)
 	serviceHandler := handlers.NewServiceHandler(svcs.serviceSvc)
@@ -163,6 +184,7 @@ func setupHandlers(svcs services, db *sql.DB) handlerSet {
 	contractGenerationHandler := handlers.NewContractGenerationHandler(svcs.contractGenerationSvc)
 	printHandler := handlers.NewPrintHandler(svcs.printSvc)
 	healthHandler := handlers.NewHealthHandler(db)
+	authHandler := handlers.NewAuthHandler(keycloakClient, cfg.JWT.Secret)
 
 	return handlerSet{
 		customerHandler:           customerHandler,
@@ -171,6 +193,7 @@ func setupHandlers(svcs services, db *sql.DB) handlerSet {
 		contractGenerationHandler: contractGenerationHandler,
 		printHandler:              printHandler,
 		healthHandler:             healthHandler,
+		authHandler:               authHandler,
 	}
 }
 
@@ -186,6 +209,7 @@ func setupRouter(cfg *config.Config, logger *slog.Logger, h handlerSet) (*router
 			ContractGeneration: h.contractGenerationHandler,
 			Print:              h.printHandler,
 			Health:             h.healthHandler,
+			Auth:               h.authHandler,
 		},
 	)
 	if err != nil {

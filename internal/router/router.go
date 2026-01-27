@@ -17,6 +17,7 @@ type Handlers struct {
 	ContractGeneration *handlers.ContractGenerationHandler
 	Print              *handlers.PrintHandler
 	Health             *handlers.HealthHandler
+	Auth               *handlers.AuthHandler
 }
 
 // Router holds all route handlers
@@ -53,6 +54,9 @@ func NewRouter(
 	if h.Health == nil {
 		return nil, errors.New("health handler is required")
 	}
+	if h.Auth == nil {
+		return nil, errors.New("auth handler is required")
+	}
 
 	return &Router{
 		mux:       http.NewServeMux(),
@@ -67,6 +71,16 @@ func (r *Router) Setup() http.Handler {
 	// Health endpoints (no auth required)
 	r.mux.HandleFunc("GET /health", r.handlers.Health.Health)
 	r.mux.HandleFunc("GET /ready", r.handlers.Health.Ready)
+
+	// Auth endpoints:
+	// - POST /api/v1/auth/login: public (no auth required)
+	// - POST /api/v1/auth/refresh: public (no auth required)
+	// - POST /api/v1/auth/logout: public (no auth required)
+	// - GET /api/v1/auth/me: protected (requires valid JWT)
+	r.mux.HandleFunc("POST /api/v1/auth/login", r.handlers.Auth.Login)
+	r.mux.HandleFunc("POST /api/v1/auth/refresh", r.handlers.Auth.Refresh)
+	r.mux.HandleFunc("POST /api/v1/auth/logout", r.handlers.Auth.Logout)
+	r.mux.HandleFunc("GET /api/v1/auth/me", r.handlers.Auth.Me)
 
 	// Customer endpoints
 	r.mux.HandleFunc("GET /api/v1/customers", r.handlers.Customer.List)
@@ -129,13 +143,23 @@ func (r *Router) Setup() http.Handler {
 	return handler
 }
 
-// authMiddleware wraps the auth middleware but skips health endpoints and OPTIONS requests
+// unauthenticatedPaths is an explicit allowlist of paths that bypass auth middleware
+var unauthenticatedPaths = map[string]bool{
+	"/health":              true,
+	"/ready":               true,
+	"/api/v1/auth/login":   true,
+	"/api/v1/auth/refresh": true,
+	"/api/v1/auth/logout":  true,
+	// Note: /api/v1/auth/me is NOT in this list - it requires authentication
+}
+
+// authMiddleware wraps the auth middleware but skips unauthenticated paths and OPTIONS requests
 func (r *Router) authMiddleware(next http.Handler) http.Handler {
 	authHandler := middleware.AuthMiddleware(r.jwtSecret)(next)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		// Skip auth for health endpoints
-		if req.URL.Path == "/health" || req.URL.Path == "/ready" {
+		// Skip auth for explicitly allowed unauthenticated paths
+		if unauthenticatedPaths[req.URL.Path] {
 			next.ServeHTTP(w, req)
 			return
 		}
