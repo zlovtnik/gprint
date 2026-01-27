@@ -141,6 +141,72 @@ func (r *PrintJobRepository) GetByContractID(ctx context.Context, tenantID strin
 	return jobs, nil
 }
 
+// FindAll retrieves all print jobs for a tenant with pagination
+func (r *PrintJobRepository) FindAll(ctx context.Context, tenantID string, offset, limit int) ([]models.ContractPrintJob, int64, error) {
+	// Get total count
+	countQuery := `SELECT COUNT(*) FROM contract_print_jobs WHERE tenant_id = :1`
+	var total int64
+	err := r.db.QueryRowContext(ctx, countQuery, tenantID).Scan(&total)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error counting print jobs: %w", err)
+	}
+
+	// Get paginated results
+	query := `
+		SELECT id, tenant_id, contract_id, status, format,
+			output_path, file_size, page_count,
+			queued_at, started_at, completed_at,
+			retry_count, error_message, requested_by
+		FROM contract_print_jobs
+		WHERE tenant_id = :1
+		ORDER BY queued_at DESC
+		OFFSET :2 ROWS FETCH NEXT :3 ROWS ONLY
+	`
+
+	rows, err := r.db.QueryContext(ctx, query, tenantID, offset, limit)
+	if err != nil {
+		return nil, 0, fmt.Errorf("error querying print jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []models.ContractPrintJob
+	for rows.Next() {
+		var j models.ContractPrintJob
+		var outputPath, errorMessage sql.NullString
+		var fileSize, pageCount sql.NullInt64
+		var startedAt, completedAt sql.NullTime
+
+		err := rows.Scan(
+			&j.ID, &j.TenantID, &j.ContractID, &j.Status, &j.Format,
+			&outputPath, &fileSize, &pageCount,
+			&j.QueuedAt, &startedAt, &completedAt,
+			&j.RetryCount, &errorMessage, &j.RequestedBy,
+		)
+		if err != nil {
+			return nil, 0, fmt.Errorf("error scanning print job: %w", err)
+		}
+
+		j.OutputPath = outputPath.String
+		j.FileSize = fileSize.Int64
+		j.PageCount = int(pageCount.Int64)
+		j.ErrorMessage = errorMessage.String
+		if startedAt.Valid {
+			j.StartedAt = &startedAt.Time
+		}
+		if completedAt.Valid {
+			j.CompletedAt = &completedAt.Time
+		}
+
+		jobs = append(jobs, j)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("error iterating print jobs: %w", err)
+	}
+
+	return jobs, total, nil
+}
+
 // UpdateStatus updates the print job status
 func (r *PrintJobRepository) UpdateStatus(ctx context.Context, tenantID string, id int64, status models.PrintJobStatus, outputPath string, fileSize int64, pageCount int, errorMsg string) error {
 	query := `

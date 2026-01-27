@@ -80,6 +80,29 @@ func (h *PrintHandler) CreateJob(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, models.SuccessResponse(job.ToResponse()))
 }
 
+// List handles GET /api/v1/print-jobs
+func (h *PrintHandler) List(w http.ResponseWriter, r *http.Request) {
+	tenantID := middleware.GetTenantID(r.Context())
+
+	// Parse pagination parameters
+	params := parsePagination(r)
+
+	jobs, total, err := h.svc.List(r.Context(), tenantID, params.Page, params.PageSize)
+	if err != nil {
+		log.Printf("failed to list print jobs: %v", err)
+		writeError(w, http.StatusInternalServerError, ErrCodeInternalError, MsgInternalServerError)
+		return
+	}
+
+	responses := make([]models.PrintJobResponse, len(jobs))
+	for i, j := range jobs {
+		responses[i] = j.ToResponse()
+	}
+
+	result := models.NewPaginatedResponse(responses, params.Page, params.PageSize, int(total))
+	writeJSON(w, http.StatusOK, models.SuccessResponse(result))
+}
+
 // GetJob handles GET /api/v1/print-jobs/{id}
 func (h *PrintHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 	tenantID := middleware.GetTenantID(r.Context())

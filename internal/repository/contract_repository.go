@@ -33,10 +33,13 @@ func (r *ContractRepository) Create(ctx context.Context, tenantID string, req *m
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	billingCycle := req.BillingCycle
-	if billingCycle == "" {
-		billingCycle = models.BillingCycleMonthly
+	billingCycleStr := string(req.BillingCycle)
+	if billingCycleStr == "" {
+		billingCycleStr = string(models.BillingCycleMonthly)
 	}
+
+	// Convert custom types to string for Oracle driver compatibility
+	contractTypeStr := string(req.ContractType)
 
 	contractQuery := `
 		INSERT INTO contracts (
@@ -50,9 +53,9 @@ func (r *ContractRepository) Create(ctx context.Context, tenantID string, req *m
 
 	var contractID int64
 	_, err = tx.ExecContext(ctx, contractQuery,
-		tenantID, req.ContractNumber, req.ContractType, req.CustomerID,
+		tenantID, req.ContractNumber, contractTypeStr, req.CustomerID,
 		req.StartDate, req.EndDate, req.DurationMonths, boolToInt(req.AutoRenew),
-		req.PaymentTerms, billingCycle, req.Notes, req.TermsConditions,
+		req.PaymentTerms, billingCycleStr, req.Notes, req.TermsConditions,
 		createdBy, createdBy,
 		sql.Out{Dest: &contractID},
 	)

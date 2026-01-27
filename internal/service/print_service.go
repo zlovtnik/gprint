@@ -94,6 +94,21 @@ func (s *PrintService) GetJobsByContract(ctx context.Context, tenantID string, c
 	return s.printJobRepo.GetByContractID(ctx, tenantID, contractID)
 }
 
+// List retrieves all print jobs for a tenant with pagination
+func (s *PrintService) List(ctx context.Context, tenantID string, page, pageSize int) ([]models.ContractPrintJob, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if pageSize < 1 {
+		pageSize = 10
+	} else if pageSize > 100 {
+		pageSize = 100
+	}
+
+	offset := (page - 1) * pageSize
+	return s.printJobRepo.FindAll(ctx, tenantID, offset, pageSize)
+}
+
 // ProcessPendingJobs processes pending print jobs (to be called by a background worker)
 func (s *PrintService) ProcessPendingJobs(ctx context.Context) error {
 	jobs, err := s.printJobRepo.GetPendingJobs(ctx, 10)

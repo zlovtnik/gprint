@@ -43,7 +43,7 @@ func (r *ServiceRepository) Create(ctx context.Context, tenantID string, req *mo
 	var id int64
 	_, err := r.db.ExecContext(ctx, query,
 		tenantID, req.ServiceCode, req.Name, req.Description, req.Category, req.Subcategory,
-		req.UnitPrice, currency, priceUnit, req.ServiceCodeFiscal,
+		req.UnitPrice, currency, string(priceUnit), req.ServiceCodeFiscal,
 		req.ISSRate, req.IRRFRate, req.PISRate, req.COFINSRate, req.CSLLRate,
 		req.Notes, createdBy, createdBy,
 		sql.Out{Dest: &id},
@@ -229,7 +229,7 @@ func (r *ServiceRepository) Update(ctx context.Context, tenantID string, id int6
 
 	result, err := r.db.ExecContext(ctx, query,
 		req.Name, req.Description, req.Category, req.Subcategory,
-		req.UnitPrice, req.Currency, req.PriceUnit, req.ServiceCodeFiscal,
+		req.UnitPrice, req.Currency, string(req.PriceUnit), req.ServiceCodeFiscal,
 		updatedBy, tenantID, id,
 	)
 	if err != nil {

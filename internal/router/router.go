@@ -110,6 +110,7 @@ func (r *Router) Setup() http.Handler {
 
 	// Print job endpoints
 	r.mux.HandleFunc("POST /api/v1/contracts/{id}/print", r.handlers.Print.CreateJob)
+	r.mux.HandleFunc("GET /api/v1/print-jobs", r.handlers.Print.List)
 	r.mux.HandleFunc("GET /api/v1/contracts/{id}/print-jobs", r.handlers.Print.GetJobsByContract)
 	r.mux.HandleFunc("GET /api/v1/print-jobs/{id}", r.handlers.Print.GetJob)
 	r.mux.HandleFunc("GET /api/v1/print-jobs/{id}/download", r.handlers.Print.Download)

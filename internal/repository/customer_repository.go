@@ -130,7 +130,7 @@ func (r *CustomerRepository) Create(ctx context.Context, tenantID string, req *m
 
 	var id int64
 	_, err := r.db.ExecContext(ctx, query,
-		tenantID, req.CustomerCode, req.CustomerType, req.Name, req.TradeName,
+		tenantID, req.CustomerCode, string(req.CustomerType), req.Name, req.TradeName,
 		req.TaxID, req.StateReg, req.MunicipalReg, req.Email, req.Phone, req.Mobile,
 		address.Street, address.Number, address.Comp, address.District,
 		address.City, address.State, address.Zip, address.Country,
@@ -275,7 +275,7 @@ func (r *CustomerRepository) Update(ctx context.Context, tenantID string, id int
 		WHERE tenant_id = :19 AND id = :20`
 
 	result, err := r.db.ExecContext(ctx, query,
-		req.CustomerType, req.Name, req.TradeName, req.TaxID,
+		string(req.CustomerType), req.Name, req.TradeName, req.TaxID,
 		req.StateReg, req.MunicipalReg, req.Email, req.Phone, req.Mobile,
 		address.Street, address.Number, address.Comp, address.District,
 		address.City, address.State, address.Zip, address.Country,

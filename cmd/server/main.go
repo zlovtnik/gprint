@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/joho/godotenv"
 	"github.com/zlovtnik/gprint/internal/config"
 	"github.com/zlovtnik/gprint/internal/handlers"
 	"github.com/zlovtnik/gprint/internal/repository"
@@ -22,6 +23,9 @@ import (
 )
 
 func main() {
+	// Load .env file if it exists
+	_ = godotenv.Load()
+
 	cfg, logger := loadConfigAndLogger()
 
 	db := setupDatabase(cfg, logger)
