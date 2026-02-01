@@ -206,21 +206,7 @@ func (r *PartyRepository) Deactivate(ctx context.Context, tenantID string, id do
 	return fp.Success(true)
 }
 
-// Helper functions
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-func nullableString(s string) sql.NullString {
-	if s == "" {
-		return sql.NullString{}
-	}
-	return sql.NullString{String: s, Valid: true}
-}
+// Note: boolToInt and nullableString are defined in helpers.go
 
 func scanParty(row *sql.Row) fp.Result[domain.Party] {
 	var party domain.Party
