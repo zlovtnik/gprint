@@ -172,7 +172,7 @@ func (s *ContractService) AddItem(ctx context.Context, tenantID string, contract
 		return nil, fmt.Errorf("%w: can only add items to contracts in DRAFT status", ErrCannotAddItem)
 	}
 
-	item, err := s.contractRepo.AddItem(ctx, tenantID, contractID, req)
+	item, err := s.contractRepo.AddItem(ctx, tenantID, contractID, req, createdBy)
 	if err != nil {
 		return nil, err
 	}
@@ -206,7 +206,7 @@ func (s *ContractService) DeleteItem(ctx context.Context, tenantID string, contr
 		return fmt.Errorf("%w: can only delete items from contracts in DRAFT status", ErrCannotDeleteItem)
 	}
 
-	if err := s.contractRepo.DeleteItem(ctx, tenantID, contractID, itemID); err != nil {
+	if err := s.contractRepo.DeleteItem(ctx, tenantID, contractID, itemID, deletedBy); err != nil {
 		return err
 	}
 

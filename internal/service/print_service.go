@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"html"
 	"log/slog"
@@ -132,14 +133,19 @@ func (s *PrintService) ProcessPendingJobs(ctx context.Context) error {
 // processJob processes a single print job
 func (s *PrintService) processJob(ctx context.Context, job *models.ContractPrintJob) error {
 	// Update status to processing
-	if err := s.printJobRepo.UpdateStatus(ctx, job.TenantID, job.ID, models.PrintJobStatusProcessing, "", 0, 0, ""); err != nil {
+	if err := s.printJobRepo.UpdateStatus(ctx, job.TenantID, job.ID, repository.UpdateStatusParams{
+		Status: models.PrintJobStatusProcessing,
+	}); err != nil {
 		return err
 	}
 
 	// Get contract with items
 	contract, err := s.contractRepo.GetByID(ctx, job.TenantID, job.ContractID)
 	if err != nil {
-		if err2 := s.printJobRepo.UpdateStatus(ctx, job.TenantID, job.ID, models.PrintJobStatusFailed, "", 0, 0, err.Error()); err2 != nil {
+		if err2 := s.printJobRepo.UpdateStatus(ctx, job.TenantID, job.ID, repository.UpdateStatusParams{
+			Status:   models.PrintJobStatusFailed,
+			ErrorMsg: err.Error(),
+		}); err2 != nil {
 			s.logger.Error("failed to update job status after GetByID error",
 				"job_id", job.ID,
 				"tenant_id", job.TenantID,
@@ -151,20 +157,26 @@ func (s *PrintService) processJob(ctx context.Context, job *models.ContractPrint
 	}
 	if contract == nil {
 		errMsg := "contract not found"
-		if err2 := s.printJobRepo.UpdateStatus(ctx, job.TenantID, job.ID, models.PrintJobStatusFailed, "", 0, 0, errMsg); err2 != nil {
+		if err2 := s.printJobRepo.UpdateStatus(ctx, job.TenantID, job.ID, repository.UpdateStatusParams{
+			Status:   models.PrintJobStatusFailed,
+			ErrorMsg: errMsg,
+		}); err2 != nil {
 			s.logger.Error("failed to update job status for not found contract",
 				"job_id", job.ID,
 				"tenant_id", job.TenantID,
 				"update_error", err2.Error(),
 			)
 		}
-		return fmt.Errorf("%s", errMsg)
+		return errors.New(errMsg)
 	}
 
 	// Generate document
 	outputPath, fileSize, pageCount, err := s.generateDocument(contract, job.Format)
 	if err != nil {
-		if err2 := s.printJobRepo.UpdateStatus(ctx, job.TenantID, job.ID, models.PrintJobStatusFailed, "", 0, 0, err.Error()); err2 != nil {
+		if err2 := s.printJobRepo.UpdateStatus(ctx, job.TenantID, job.ID, repository.UpdateStatusParams{
+			Status:   models.PrintJobStatusFailed,
+			ErrorMsg: err.Error(),
+		}); err2 != nil {
 			s.logger.Error("failed to update job status after generateDocument error",
 				"job_id", job.ID,
 				"tenant_id", job.TenantID,
@@ -176,7 +188,12 @@ func (s *PrintService) processJob(ctx context.Context, job *models.ContractPrint
 	}
 
 	// Update status to completed
-	return s.printJobRepo.UpdateStatus(ctx, job.TenantID, job.ID, models.PrintJobStatusCompleted, outputPath, fileSize, pageCount, "")
+	return s.printJobRepo.UpdateStatus(ctx, job.TenantID, job.ID, repository.UpdateStatusParams{
+		Status:     models.PrintJobStatusCompleted,
+		OutputPath: outputPath,
+		FileSize:   fileSize,
+		PageCount:  pageCount,
+	})
 }
 
 // generateDocument generates the contract document
