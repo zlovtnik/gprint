@@ -30,7 +30,11 @@ func main() {
 
 	db := setupDatabase(cfg, logger)
 
-	repos := setupRepositories(db)
+	repos, err := setupRepositories(db)
+	if err != nil {
+		logger.Error("failed to setup repositories", "error", err)
+		os.Exit(1)
+	}
 
 	services := setupServices(repos, cfg, logger)
 
@@ -121,9 +125,12 @@ type handlerSet struct {
 	authHandler               *handlers.AuthHandler
 }
 
-func setupRepositories(db *sql.DB) repositories {
+func setupRepositories(db *sql.DB) (repositories, error) {
 	// Initialize repositories
-	customerRepo := repository.NewCustomerRepository(db)
+	customerRepo, err := repository.NewCustomerRepository(db)
+	if err != nil {
+		return repositories{}, err
+	}
 	serviceRepo := repository.NewServiceRepository(db)
 	contractRepo := repository.NewContractRepository(db)
 	historyRepo := repository.NewHistoryRepository(db)
@@ -137,7 +144,7 @@ func setupRepositories(db *sql.DB) repositories {
 		historyRepo:            historyRepo,
 		printJobRepo:           printJobRepo,
 		contractGenerationRepo: contractGenerationRepo,
-	}
+	}, nil
 }
 
 func setupServices(repos repositories, cfg *config.Config, logger *slog.Logger) services {
