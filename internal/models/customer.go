@@ -45,36 +45,49 @@ type Address struct {
 	Country  string `json:"country,omitempty"`
 }
 
+// AddressInput represents a request payload for address updates.
+// Pointer fields allow distinguishing "not provided" from "set to empty".
+type AddressInput struct {
+	Street   *string `json:"street,omitempty"`
+	Number   *string `json:"number,omitempty"`
+	Comp     *string `json:"comp,omitempty"`
+	District *string `json:"district,omitempty"`
+	City     *string `json:"city,omitempty"`
+	State    *string `json:"state,omitempty"`
+	Zip      *string `json:"zip,omitempty"`
+	Country  *string `json:"country,omitempty"`
+}
+
 // CreateCustomerRequest represents the request to create a customer
 type CreateCustomerRequest struct {
-	CustomerCode string       `json:"customer_code"`
-	CustomerType CustomerType `json:"customer_type"`
-	Name         string       `json:"name"`
-	TradeName    string       `json:"trade_name,omitempty"`
-	TaxID        string       `json:"tax_id,omitempty"`
-	StateReg     string       `json:"state_reg,omitempty"`
-	MunicipalReg string       `json:"municipal_reg,omitempty"`
-	Email        string       `json:"email,omitempty"`
-	Phone        string       `json:"phone,omitempty"`
-	Mobile       string       `json:"mobile,omitempty"`
-	Address      Address      `json:"address"`
-	Notes        string       `json:"notes,omitempty"`
+	CustomerCode string        `json:"customer_code"`
+	CustomerType CustomerType  `json:"customer_type"`
+	Name         string        `json:"name"`
+	TradeName    *string       `json:"trade_name,omitempty"`
+	TaxID        *string       `json:"tax_id,omitempty"`
+	StateReg     *string       `json:"state_reg,omitempty"`
+	MunicipalReg *string       `json:"municipal_reg,omitempty"`
+	Email        *string       `json:"email,omitempty"`
+	Phone        *string       `json:"phone,omitempty"`
+	Mobile       *string       `json:"mobile,omitempty"`
+	Address      *AddressInput `json:"address,omitempty"` // nil = no address
+	Notes        *string       `json:"notes,omitempty"`
 }
 
 // UpdateCustomerRequest represents the request to update a customer
 type UpdateCustomerRequest struct {
-	CustomerType CustomerType `json:"customer_type,omitempty"`
-	Name         string       `json:"name,omitempty"`
-	TradeName    string       `json:"trade_name,omitempty"`
-	TaxID        string       `json:"tax_id,omitempty"`
-	StateReg     string       `json:"state_reg,omitempty"`
-	MunicipalReg string       `json:"municipal_reg,omitempty"`
-	Email        string       `json:"email,omitempty"`
-	Phone        string       `json:"phone,omitempty"`
-	Mobile       string       `json:"mobile,omitempty"`
-	Address      Address      `json:"address"`
-	Active       *bool        `json:"active,omitempty"`
-	Notes        string       `json:"notes,omitempty"`
+	CustomerType *CustomerType `json:"customer_type,omitempty"`
+	Name         *string       `json:"name,omitempty"`
+	TradeName    *string       `json:"trade_name,omitempty"`
+	TaxID        *string       `json:"tax_id,omitempty"`
+	StateReg     *string       `json:"state_reg,omitempty"`
+	MunicipalReg *string       `json:"municipal_reg,omitempty"`
+	Email        *string       `json:"email,omitempty"`
+	Phone        *string       `json:"phone,omitempty"`
+	Mobile       *string       `json:"mobile,omitempty"`
+	Address      *AddressInput `json:"address,omitempty"` // nil = no change to address
+	Active       *bool         `json:"active,omitempty"`
+	Notes        *string       `json:"notes,omitempty"`
 }
 
 // CustomerResponse represents the API response for a customer

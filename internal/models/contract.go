@@ -134,10 +134,10 @@ type UpdateContractRequest struct {
 	EndDate         *time.Time    `json:"end_date,omitempty"`
 	DurationMonths  *int          `json:"duration_months,omitempty"`
 	AutoRenew       *bool         `json:"auto_renew,omitempty"`
-	PaymentTerms    string        `json:"payment_terms,omitempty"`
+	PaymentTerms    *string       `json:"payment_terms,omitempty"` // nil=no change, &""=clear
 	BillingCycle    *BillingCycle `json:"billing_cycle,omitempty"`
-	Notes           string        `json:"notes,omitempty"`
-	TermsConditions string        `json:"terms_conditions,omitempty"`
+	Notes           *string       `json:"notes,omitempty"`            // nil=no change, &""=clear
+	TermsConditions *string       `json:"terms_conditions,omitempty"` // nil=no change, &""=clear
 }
 
 // UpdateContractStatusRequest represents the request to update contract status

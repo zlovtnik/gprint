@@ -50,11 +50,11 @@ type CreateServiceRequest struct {
 	Currency          string    `json:"currency,omitempty"`
 	PriceUnit         PriceUnit `json:"price_unit,omitempty"`
 	ServiceCodeFiscal string    `json:"service_code_fiscal,omitempty"`
-	ISSRate           float64   `json:"iss_rate,omitempty"`
-	IRRFRate          float64   `json:"irrf_rate,omitempty"`
-	PISRate           float64   `json:"pis_rate,omitempty"`
-	COFINSRate        float64   `json:"cofins_rate,omitempty"`
-	CSLLRate          float64   `json:"csll_rate,omitempty"`
+	ISSRate           *float64  `json:"iss_rate,omitempty"`    // nil=not provided, 0=0% rate
+	IRRFRate          *float64  `json:"irrf_rate,omitempty"`   // nil=not provided, 0=0% rate
+	PISRate           *float64  `json:"pis_rate,omitempty"`    // nil=not provided, 0=0% rate
+	COFINSRate        *float64  `json:"cofins_rate,omitempty"` // nil=not provided, 0=0% rate
+	CSLLRate          *float64  `json:"csll_rate,omitempty"`   // nil=not provided, 0=0% rate
 	Notes             string    `json:"notes,omitempty"`
 }
 
