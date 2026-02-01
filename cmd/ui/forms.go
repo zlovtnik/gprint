@@ -258,7 +258,6 @@ func (m Model) handleContractFormSubmit() (tea.Model, tea.Cmd) {
 		m = m.updateInputFocus()
 		return m, nil
 	}
-	totalValueStr := totalValue.StringFixed(2)
 
 	if m.formAction == "create" {
 		req := &api.CreateContractRequest{
@@ -266,7 +265,7 @@ func (m Model) handleContractFormSubmit() (tea.Model, tea.Cmd) {
 			CustomerID:     customerID,
 			ContractType:   m.inputs[2].Value(),
 			BillingCycle:   m.inputs[3].Value(),
-			TotalValue:     totalValueStr,
+			TotalValue:     totalValue,
 		}
 		return m, m.createContract(req)
 	}
@@ -275,7 +274,7 @@ func (m Model) handleContractFormSubmit() (tea.Model, tea.Cmd) {
 		CustomerID:     &customerID,
 		ContractType:   m.inputs[2].Value(),
 		BillingCycle:   m.inputs[3].Value(),
-		TotalValue:     totalValueStr,
+		TotalValue:     &totalValue,
 	}
 	// Guard against nil selectedContract
 	if m.selectedContract == nil {

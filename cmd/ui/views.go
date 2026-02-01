@@ -362,6 +362,10 @@ func (m Model) renderServiceForm() string {
 	b.WriteString(ui.SubtitleStyle.Render(title) + "\n\n")
 
 	labels := []string{"Code", "Name", "Description", "Category", "Unit Price", "Price Unit"}
+	// Warn if inputs and labels mismatch
+	if len(m.inputs) != len(labels) {
+		b.WriteString(ui.ErrorStyle.Render(fmt.Sprintf("[Form Error: expected %d inputs, got %d]\n\n", len(labels), len(m.inputs))))
+	}
 	// Use bounded iteration to prevent index out of range
 	maxItems := len(labels)
 	if len(m.inputs) < maxItems {
@@ -457,6 +461,10 @@ func (m Model) renderContractForm() string {
 	b.WriteString(ui.SubtitleStyle.Render(title) + "\n\n")
 
 	labels := []string{"Contract Number", "Customer ID", "Type", "Billing Cycle", "Total Value"}
+	// Warn if inputs and labels mismatch
+	if len(m.inputs) != len(labels) {
+		b.WriteString(ui.ErrorStyle.Render(fmt.Sprintf("[Form Error: expected %d inputs, got %d]\n\n", len(labels), len(m.inputs))))
+	}
 	// Use bounded iteration to prevent index out of range
 	maxItems := len(labels)
 	if len(m.inputs) < maxItems {

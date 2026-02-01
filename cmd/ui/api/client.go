@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,9 @@ const maxResponseBody = 10 << 20
 // ErrResponseTooLarge is returned when the response body exceeds maxResponseBody
 var ErrResponseTooLarge = errors.New("response body too large")
 
+// ErrInvalidBaseURL is returned when the base URL is empty or malformed
+var ErrInvalidBaseURL = errors.New("invalid base URL: must be non-empty with scheme and host")
+
 // Client is an HTTP client for the GPrint API
 type Client struct {
 	BaseURL    string
@@ -27,8 +31,19 @@ type Client struct {
 	token      string
 }
 
-// NewClient creates a new API client
-func NewClient(baseURL string) *Client {
+// NewClient creates a new API client.
+// Returns an error if baseURL is empty or malformed (missing scheme/host).
+func NewClient(baseURL string) (*Client, error) {
+	if baseURL == "" {
+		return nil, ErrInvalidBaseURL
+	}
+
+	// Validate URL has scheme and host
+	parsed, err := url.ParseRequestURI(baseURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, ErrInvalidBaseURL
+	}
+
 	// Normalize BaseURL by trimming all trailing slashes to prevent double slashes
 	normalizedURL := strings.TrimRight(baseURL, "/")
 	return &Client{
@@ -36,7 +51,7 @@ func NewClient(baseURL string) *Client {
 		HTTPClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-	}
+	}, nil
 }
 
 // SetToken sets the JWT token for authenticated requests
@@ -75,10 +90,14 @@ type PaginatedResponse struct {
 	TotalPages int             `json:"total_pages"`
 }
 
-// ErrorString safely returns the error message from a Response
+// ErrorString safely returns the error message from a Response.
+// Returns empty string for successful responses.
 func (r *Response) ErrorString() string {
 	if r == nil {
 		return "no response"
+	}
+	if r.Success {
+		return ""
 	}
 	if r.Error == nil {
 		return "unknown error"
@@ -153,6 +172,8 @@ func (c *Client) doRequestWithContext(ctx context.Context, method, path string, 
 		return nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
+	// Always request JSON responses
+	req.Header.Set("Accept", "application/json")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -203,9 +224,19 @@ func (c *Client) Post(path string, body interface{}) (*Response, error) {
 	return c.doRequest(http.MethodPost, path, body)
 }
 
+// PostWithContext performs a POST request with context support
+func (c *Client) PostWithContext(ctx context.Context, path string, body interface{}) (*Response, error) {
+	return c.doRequestWithContext(ctx, http.MethodPost, path, body)
+}
+
 // Put performs a PUT request
 func (c *Client) Put(path string, body interface{}) (*Response, error) {
 	return c.doRequest(http.MethodPut, path, body)
+}
+
+// PutWithContext performs a PUT request with context support
+func (c *Client) PutWithContext(ctx context.Context, path string, body interface{}) (*Response, error) {
+	return c.doRequestWithContext(ctx, http.MethodPut, path, body)
 }
 
 // Delete performs a DELETE request
@@ -213,7 +244,17 @@ func (c *Client) Delete(path string) (*Response, error) {
 	return c.doRequest(http.MethodDelete, path, nil)
 }
 
+// DeleteWithContext performs a DELETE request with context support
+func (c *Client) DeleteWithContext(ctx context.Context, path string) (*Response, error) {
+	return c.doRequestWithContext(ctx, http.MethodDelete, path, nil)
+}
+
 // Patch performs a PATCH request
 func (c *Client) Patch(path string, body interface{}) (*Response, error) {
 	return c.doRequest(http.MethodPatch, path, body)
+}
+
+// PatchWithContext performs a PATCH request with context support
+func (c *Client) PatchWithContext(ctx context.Context, path string, body interface{}) (*Response, error) {
+	return c.doRequestWithContext(ctx, http.MethodPatch, path, body)
 }

@@ -209,20 +209,20 @@ type UpdateServiceRequest struct {
 
 // CreateContractRequest is the request payload for creating a contract
 type CreateContractRequest struct {
-	ContractNumber string `json:"contract_number"`
-	CustomerID     int64  `json:"customer_id"`
-	ContractType   string `json:"contract_type"`
-	BillingCycle   string `json:"billing_cycle"`
-	TotalValue     string `json:"total_value"`
+	ContractNumber string          `json:"contract_number"`
+	CustomerID     int64           `json:"customer_id"`
+	ContractType   string          `json:"contract_type"`
+	BillingCycle   string          `json:"billing_cycle"`
+	TotalValue     decimal.Decimal `json:"total_value"`
 }
 
 // UpdateContractRequest is the request payload for updating a contract
 type UpdateContractRequest struct {
-	ContractNumber string `json:"contract_number,omitempty"`
-	CustomerID     *int64 `json:"customer_id,omitempty"`
-	ContractType   string `json:"contract_type,omitempty"`
-	BillingCycle   string `json:"billing_cycle,omitempty"`
-	TotalValue     string `json:"total_value,omitempty"`
+	ContractNumber string           `json:"contract_number,omitempty"`
+	CustomerID     *int64           `json:"customer_id,omitempty"`
+	ContractType   string           `json:"contract_type,omitempty"`
+	BillingCycle   string           `json:"billing_cycle,omitempty"`
+	TotalValue     *decimal.Decimal `json:"total_value,omitempty"`
 }
 
 // listItems is a generic helper for fetching paginated lists

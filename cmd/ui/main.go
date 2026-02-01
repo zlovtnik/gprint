@@ -1,7 +1,6 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"os"
 
@@ -10,9 +9,6 @@ import (
 	"github.com/zlovtnik/gprint/cmd/ui/api"
 	"github.com/zlovtnik/gprint/cmd/ui/ui"
 )
-
-// Error variables
-var errLoginCredentialsRequired = errors.New("username and password are required")
 
 // UI string constants to avoid duplication
 const (
@@ -78,7 +74,11 @@ func initialModel() Model {
 		baseURL = "http://localhost:8080"
 	}
 
-	client := api.NewClient(baseURL)
+	client, err := api.NewClient(baseURL)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: invalid API URL %q: %v\n", baseURL, err)
+		os.Exit(1)
+	}
 
 	// Check for token in environment
 	token := os.Getenv("GPRINT_TOKEN")
@@ -345,8 +345,8 @@ func (m Model) handleUpKey(key string, inFormMode bool) (tea.Model, tea.Cmd) {
 	}
 	if m.focusOnSidebar {
 		m.sidebarCursor = m.handleUp()
-	} else if m.cursor > 0 {
-		m.cursor--
+	} else {
+		m.cursor = m.handleUp()
 	}
 	return m, nil
 }

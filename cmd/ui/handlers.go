@@ -2,12 +2,16 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/zlovtnik/gprint/cmd/ui/api"
 	"github.com/zlovtnik/gprint/cmd/ui/ui"
 )
+
+// Error variables
+var errLoginCredentialsRequired = errors.New("username and password are required")
 
 // loginMsg is sent when login completes
 type loginMsg struct {
