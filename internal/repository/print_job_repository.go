@@ -8,17 +8,35 @@ import (
 	"github.com/zlovtnik/gprint/internal/models"
 )
 
+// TablePrintJobs is the table name for print job operations
+const TablePrintJobs = "CONTRACT_PRINT_JOBS"
+
 // PrintJobRepository handles print job data access
 type PrintJobRepository struct {
-	db *sql.DB
+	db      *sql.DB
+	generic *GenericRepository
+}
+
+// UpdateStatusParams contains parameters for updating a print job's status.
+// This groups related parameters to reduce function argument count.
+type UpdateStatusParams struct {
+	Status     models.PrintJobStatus
+	OutputPath string
+	FileSize   int64
+	PageCount  int
+	ErrorMsg   string
+	UpdatedBy  string // User who triggered the update (for audit trail)
 }
 
 // NewPrintJobRepository creates a new PrintJobRepository
 func NewPrintJobRepository(db *sql.DB) *PrintJobRepository {
-	return &PrintJobRepository{db: db}
+	return &PrintJobRepository{
+		db:      db,
+		generic: NewGenericRepository(db),
+	}
 }
 
-// Create creates a new print job
+// Create creates a new print job using dynamic CRUD
 func (r *PrintJobRepository) Create(ctx context.Context, tenantID string, req *models.CreatePrintJobRequest, requestedBy string) (*models.ContractPrintJob, error) {
 	if req == nil {
 		return nil, fmt.Errorf("create print job request cannot be nil")
@@ -28,30 +46,38 @@ func (r *PrintJobRepository) Create(ctx context.Context, tenantID string, req *m
 		format = models.PrintFormatPDF
 	}
 
-	query := `
-		INSERT INTO contract_print_jobs (
-			tenant_id, contract_id, format, requested_by
-		) VALUES (
-			:1, :2, :3, :4
-		) RETURNING id INTO :5`
+	columns := []ColumnValue{
+		{Name: "CONTRACT_ID", Value: req.ContractID, Type: "NUMBER"},
+		{Name: "FORMAT", Value: string(format), Type: "STRING"},
+		{Name: "REQUESTED_BY", Value: requestedBy, Type: "STRING"},
+		{Name: "STATUS", Value: string(models.PrintJobStatusQueued), Type: "STRING"},
+	}
 
-	var id int64
-	_, err := r.db.ExecContext(ctx, query, tenantID, req.ContractID, format, requestedBy, sql.Out{Dest: &id})
+	result, err := r.generic.Insert(ctx, TablePrintJobs, tenantID, columns, requestedBy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create print job: %w", err)
 	}
+	if !result.Success {
+		return nil, fmt.Errorf("failed to create print job: %s", result.ErrorMessage)
+	}
+	if result.GeneratedID == nil {
+		return nil, fmt.Errorf("failed to create print job: no ID returned")
+	}
 
-	return r.GetByID(ctx, tenantID, id)
+	return r.GetByID(ctx, tenantID, *result.GeneratedID)
 }
 
-// GetByID retrieves a print job by ID
+// GetByID retrieves a print job by ID.
+// NOTE: Stored procedure sp_get_print_job is available but this method uses inline SQL
+// for Go driver compatibility. Create uses generic.Insert and UpdateStatus uses generic.Update.
+// FUTURE: Migrate to sp_get_print_job if/when ref cursor handling is needed.
 func (r *PrintJobRepository) GetByID(ctx context.Context, tenantID string, id int64) (*models.ContractPrintJob, error) {
 	query := `
 		SELECT id, tenant_id, contract_id, status, format,
 			output_path, file_size, page_count,
 			queued_at, started_at, completed_at,
 			retry_count, error_message, requested_by
-		FROM contract_print_jobs
+		FROM ` + TablePrintJobs + `
 		WHERE tenant_id = :1 AND id = :2`
 
 	row := r.db.QueryRowContext(ctx, query, tenantID, id)
@@ -67,13 +93,14 @@ func (r *PrintJobRepository) GetByID(ctx context.Context, tenantID string, id in
 }
 
 // GetByContractID retrieves print jobs for a contract
+// Stored procedure sp_get_print_jobs_by_contract available for ref cursor usage
 func (r *PrintJobRepository) GetByContractID(ctx context.Context, tenantID string, contractID int64) ([]models.ContractPrintJob, error) {
 	query := `
 		SELECT id, tenant_id, contract_id, status, format,
 			output_path, file_size, page_count,
 			queued_at, started_at, completed_at,
 			retry_count, error_message, requested_by
-		FROM contract_print_jobs
+		FROM ` + TablePrintJobs + `
 		WHERE tenant_id = :1 AND contract_id = :2
 		ORDER BY queued_at DESC`
 
@@ -102,7 +129,7 @@ func (r *PrintJobRepository) GetByContractID(ctx context.Context, tenantID strin
 // FindAll retrieves all print jobs for a tenant with pagination
 func (r *PrintJobRepository) FindAll(ctx context.Context, tenantID string, offset, limit int) ([]models.ContractPrintJob, int64, error) {
 	// Get total count
-	countQuery := `SELECT COUNT(*) FROM contract_print_jobs WHERE tenant_id = :1`
+	countQuery := `SELECT COUNT(*) FROM ` + TablePrintJobs + ` WHERE tenant_id = :1`
 	var total int64
 	err := r.db.QueryRowContext(ctx, countQuery, tenantID).Scan(&total)
 	if err != nil {
@@ -110,12 +137,13 @@ func (r *PrintJobRepository) FindAll(ctx context.Context, tenantID string, offse
 	}
 
 	// Get paginated results
+	// Stored procedure sp_list_print_jobs available for ref cursor usage
 	query := `
 		SELECT id, tenant_id, contract_id, status, format,
 			output_path, file_size, page_count,
 			queued_at, started_at, completed_at,
 			retry_count, error_message, requested_by
-		FROM contract_print_jobs
+		FROM ` + TablePrintJobs + `
 		WHERE tenant_id = :1
 		ORDER BY queued_at DESC
 		OFFSET :2 ROWS FETCH NEXT :3 ROWS ONLY
@@ -143,41 +171,54 @@ func (r *PrintJobRepository) FindAll(ctx context.Context, tenantID string, offse
 	return jobs, total, nil
 }
 
-// UpdateStatus updates the print job status
-func (r *PrintJobRepository) UpdateStatus(ctx context.Context, tenantID string, id int64, status models.PrintJobStatus, outputPath string, fileSize int64, pageCount int, errorMsg string) error {
-	query := `
-		UPDATE contract_print_jobs SET
-			status = :1,
-			output_path = :2,
-			file_size = :3,
-			page_count = :4,
-			error_message = :5,
-			started_at = CASE WHEN :6 = 'PROCESSING' AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
-			completed_at = CASE WHEN :7 IN ('COMPLETED', 'FAILED') THEN CURRENT_TIMESTAMP ELSE completed_at END
-		WHERE tenant_id = :8 AND id = :9`
+// UpdateStatus updates the print job status using dynamic CRUD
+func (r *PrintJobRepository) UpdateStatus(ctx context.Context, tenantID string, id int64, params UpdateStatusParams) error {
+	columns := []ColumnValue{
+		{Name: "STATUS", Value: string(params.Status), Type: "STRING"},
+	}
+	// Add optional fields if present
+	if params.OutputPath != "" {
+		columns = append(columns, ColumnValue{Name: "OUTPUT_PATH", Value: params.OutputPath, Type: "STRING"})
+	}
+	if params.FileSize > 0 {
+		columns = append(columns, ColumnValue{Name: "FILE_SIZE", Value: params.FileSize, Type: "NUMBER"})
+	}
+	if params.PageCount > 0 {
+		columns = append(columns, ColumnValue{Name: "PAGE_COUNT", Value: params.PageCount, Type: "NUMBER"})
+	}
+	if params.ErrorMsg != "" {
+		columns = append(columns, ColumnValue{Name: "ERROR_MESSAGE", Value: params.ErrorMsg, Type: "STRING"})
+	}
+	// Set timestamps based on status
+	if params.Status == models.PrintJobStatusProcessing {
+		columns = append(columns, ColumnValue{Name: "STARTED_AT", Value: "SYSDATE", Type: "DATE"})
+	}
+	if params.Status == models.PrintJobStatusCompleted || params.Status == models.PrintJobStatusFailed {
+		columns = append(columns, ColumnValue{Name: "COMPLETED_AT", Value: "SYSDATE", Type: "DATE"})
+	}
 
-	result, err := r.db.ExecContext(ctx, query, string(status), outputPath, fileSize, pageCount, errorMsg, string(status), string(status), tenantID, id)
+	result, err := r.generic.Update(ctx, TablePrintJobs, tenantID, id, columns, params.UpdatedBy)
 	if err != nil {
 		return fmt.Errorf("failed to update print job status: %w", err)
 	}
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
+	if !result.Success {
+		return fmt.Errorf("failed to update print job status: %s", result.ErrorMessage)
 	}
-	if rowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		return fmt.Errorf("print job not found or tenant mismatch")
 	}
 	return nil
 }
 
 // GetPendingJobs retrieves pending print jobs
+// Stored procedure sp_get_pending_print_jobs available for ref cursor usage
 func (r *PrintJobRepository) GetPendingJobs(ctx context.Context, limit int) ([]models.ContractPrintJob, error) {
 	query := `
 		SELECT id, tenant_id, contract_id, status, format,
 			output_path, file_size, page_count,
 			queued_at, started_at, completed_at,
 			retry_count, error_message, requested_by
-		FROM contract_print_jobs
+		FROM ` + TablePrintJobs + `
 		WHERE status = :1
 		ORDER BY queued_at ASC
 		FETCH FIRST :2 ROWS ONLY`

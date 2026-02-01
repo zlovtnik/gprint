@@ -69,6 +69,15 @@ func TimeFromNull(nt sql.NullTime) *time.Time {
 	return nil
 }
 
+// TimeValueFromNull extracts the time.Time value from a sql.NullTime.
+// Returns zero time if null.
+func TimeValueFromNull(nt sql.NullTime) time.Time {
+	if nt.Valid {
+		return nt.Time
+	}
+	return time.Time{}
+}
+
 // Int64FromNull extracts the int64 value from a sql.NullInt64.
 // Returns 0 if null.
 func Int64FromNull(ni sql.NullInt64) int64 {

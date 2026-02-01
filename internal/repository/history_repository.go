@@ -18,30 +18,47 @@ func NewHistoryRepository(db *sql.DB) *HistoryRepository {
 	return &HistoryRepository{db: db}
 }
 
-// Create creates a new history entry
+// Create creates a new history entry using stored procedure
 func (r *HistoryRepository) Create(ctx context.Context, tenantID string, req *models.CreateHistoryRequest) (*models.ContractHistory, error) {
-	query := `
-		INSERT INTO contract_history (
-			tenant_id, contract_id, action, field_changed,
-			old_value, new_value, performed_by, ip_address, user_agent
-		) VALUES (
-			:1, :2, :3, :4, :5, :6, :7, :8, :9
-		) RETURNING id INTO :10`
-
+	// Use stored procedure sp_insert_history
 	var id int64
-	_, err := r.db.ExecContext(ctx, query,
+	var success int
+	var errorMsg string
+
+	_, err := r.db.ExecContext(ctx, `BEGIN sp_insert_history(
+		p_tenant_id => :1,
+		p_contract_id => :2,
+		p_action => :3,
+		p_field_changed => :4,
+		p_old_value => :5,
+		p_new_value => :6,
+		p_performed_by => :7,
+		p_ip_address => :8,
+		p_user_agent => :9,
+		p_id => :10,
+		p_success => :11,
+		p_error_msg => :12
+	); END;`,
 		tenantID, req.ContractID, req.Action, req.FieldChanged,
 		req.OldValue, req.NewValue, req.PerformedBy, req.IPAddress, req.UserAgent,
 		sql.Out{Dest: &id},
+		sql.Out{Dest: &success},
+		sql.Out{Dest: &errorMsg},
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create history entry: %w", err)
+	}
+	if success != 1 {
+		return nil, fmt.Errorf("failed to create history entry: %s", errorMsg)
 	}
 
 	return r.GetByID(ctx, tenantID, id)
 }
 
-// GetByID retrieves a history entry by ID
+// GetByID retrieves a history entry by ID.
+// NOTE: Uses direct SQL SELECT against contract_history table.
+// Stored procedure sp_get_history is available but not used here for Go driver compatibility.
+// FUTURE: Migrate to sp_get_history if/when ref cursor handling is needed.
 func (r *HistoryRepository) GetByID(ctx context.Context, tenantID string, id int64) (*models.ContractHistory, error) {
 	query := `
 		SELECT id, tenant_id, contract_id, action, field_changed,
@@ -82,7 +99,9 @@ func (r *HistoryRepository) GetByContractID(ctx context.Context, tenantID string
 		return nil, 0, fmt.Errorf("failed to count history: %w", err)
 	}
 
-	// Main query
+	// Main query - uses direct SQL for Go driver compatibility
+	// Stored procedure sp_get_history_by_contract is available but not used here.
+	// FUTURE: Migrate to sp_get_history_by_contract if/when ref cursor handling is needed.
 	query := `
 		SELECT id, tenant_id, contract_id, action, field_changed,
 			old_value, new_value, performed_by, performed_at, ip_address, user_agent

@@ -9,17 +9,29 @@ import (
 	"github.com/zlovtnik/gprint/internal/models"
 )
 
-// ServiceRepository handles service data access
+// TableServices is the table name for services.
+const TableServices = "SERVICES"
+
+// ServiceRepository handles service data access.
+// Uses direct SQL reads (GetByID, List, GetCategories) via db for performance/control,
+// and delegates writes (Create, Update, Delete) to generic via the GenericRepository.
 type ServiceRepository struct {
-	db *sql.DB
+	db      *sql.DB
+	generic *GenericRepository
 }
 
 // NewServiceRepository creates a new ServiceRepository
 func NewServiceRepository(db *sql.DB) *ServiceRepository {
-	return &ServiceRepository{db: db}
+	if db == nil {
+		panic("ServiceRepository: db is nil")
+	}
+	return &ServiceRepository{
+		db:      db,
+		generic: NewGenericRepository(db),
+	}
 }
 
-// Create creates a new service
+// Create creates a new service using dynamic CRUD
 func (r *ServiceRepository) Create(ctx context.Context, tenantID string, req *models.CreateServiceRequest, createdBy string) (*models.Service, error) {
 	currency := req.Currency
 	if currency == "" {
@@ -30,32 +42,70 @@ func (r *ServiceRepository) Create(ctx context.Context, tenantID string, req *mo
 		priceUnit = models.PriceUnitHour
 	}
 
-	query := `
-		INSERT INTO services (
-			tenant_id, service_code, name, description, category, subcategory,
-			unit_price, currency, price_unit, service_code_fiscal,
-			iss_rate, irrf_rate, pis_rate, cofins_rate, csll_rate,
-			notes, created_by, updated_by
-		) VALUES (
-			:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14, :15, :16, :17, :18
-		) RETURNING id INTO :19`
+	columns := []ColumnValue{
+		{Name: "SERVICE_CODE", Value: req.ServiceCode},
+		{Name: "NAME", Value: req.Name},
+		{Name: "UNIT_PRICE", Value: req.UnitPrice, Type: "NUMBER"},
+		{Name: "CURRENCY", Value: currency},
+		{Name: "PRICE_UNIT", Value: string(priceUnit)},
+		{Name: "ACTIVE", Value: 1, Type: "NUMBER"},
+	}
 
-	var id int64
-	_, err := r.db.ExecContext(ctx, query,
-		tenantID, req.ServiceCode, req.Name, req.Description, req.Category, req.Subcategory,
-		req.UnitPrice, currency, string(priceUnit), req.ServiceCodeFiscal,
-		req.ISSRate, req.IRRFRate, req.PISRate, req.COFINSRate, req.CSLLRate,
-		req.Notes, createdBy, createdBy,
-		sql.Out{Dest: &id},
-	)
+	if req.Description != "" {
+		columns = append(columns, ColumnValue{Name: "DESCRIPTION", Value: req.Description})
+	}
+	if req.Category != "" {
+		columns = append(columns, ColumnValue{Name: "CATEGORY", Value: req.Category})
+	}
+	if req.Subcategory != "" {
+		columns = append(columns, ColumnValue{Name: "SUBCATEGORY", Value: req.Subcategory})
+	}
+	if req.ServiceCodeFiscal != "" {
+		columns = append(columns, ColumnValue{Name: "SERVICE_CODE_FISCAL", Value: req.ServiceCodeFiscal})
+	}
+	// Rate fields: nil=not provided, 0=explicit 0% rate (e.g., tax-exempt)
+	if req.ISSRate != nil {
+		columns = append(columns, ColumnValue{Name: "ISS_RATE", Value: *req.ISSRate, Type: "NUMBER"})
+	}
+	if req.IRRFRate != nil {
+		columns = append(columns, ColumnValue{Name: "IRRF_RATE", Value: *req.IRRFRate, Type: "NUMBER"})
+	}
+	if req.PISRate != nil {
+		columns = append(columns, ColumnValue{Name: "PIS_RATE", Value: *req.PISRate, Type: "NUMBER"})
+	}
+	if req.COFINSRate != nil {
+		columns = append(columns, ColumnValue{Name: "COFINS_RATE", Value: *req.COFINSRate, Type: "NUMBER"})
+	}
+	if req.CSLLRate != nil {
+		columns = append(columns, ColumnValue{Name: "CSLL_RATE", Value: *req.CSLLRate, Type: "NUMBER"})
+	}
+	if req.Notes != "" {
+		columns = append(columns, ColumnValue{Name: "NOTES", Value: req.Notes})
+	}
+
+	result, err := r.generic.Insert(ctx, TableServices, tenantID, columns, createdBy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create service: %w", err)
 	}
+	if !result.Success {
+		msg := result.ErrorMessage
+		if msg == "" {
+			msg = "unknown error creating service"
+		}
+		return nil, fmt.Errorf("failed to create service: %s", msg)
+	}
+	if result.GeneratedID == nil {
+		return nil, fmt.Errorf("failed to create service: no ID returned")
+	}
 
-	return r.GetByID(ctx, tenantID, id)
+	return r.GetByID(ctx, tenantID, *result.GeneratedID)
 }
 
-// GetByID retrieves a service by ID
+// GetByID retrieves a service by ID.
+// NOTE: Uses direct SQL for Go driver compatibility. Create and Update now use
+// dynamic CRUD helpers (generic.Insert and generic.Update).
+// Stored procedure sp_get_service is available but not used here.
+// FUTURE: Migrate to sp_get_service if/when ref cursor handling is needed.
 func (r *ServiceRepository) GetByID(ctx context.Context, tenantID string, id int64) (*models.Service, error) {
 	query := `
 		SELECT id, tenant_id, service_code, name, description, category, subcategory,
@@ -123,6 +173,7 @@ func getServiceSortClause(sortBy, sortDir string) (string, string) {
 }
 
 // List retrieves services with pagination
+// Stored procedure sp_list_services available for ref cursor usage
 func (r *ServiceRepository) List(ctx context.Context, tenantID string, params models.PaginationParams, search models.SearchParams) ([]models.Service, int, error) {
 	// Count query
 	countQuery := `SELECT COUNT(*) FROM services WHERE tenant_id = :1`
@@ -225,62 +276,74 @@ func (r *ServiceRepository) List(ctx context.Context, tenantID string, params mo
 	return services, total, nil
 }
 
-// Update updates a service
+// Update updates a service using dynamic CRUD
 func (r *ServiceRepository) Update(ctx context.Context, tenantID string, id int64, req *models.UpdateServiceRequest, updatedBy string) (*models.Service, error) {
-	query := `
-		UPDATE services SET
-			name = COALESCE(NULLIF(:1, ''), name),
-			description = :2,
-			category = :3,
-			subcategory = :4,
-			unit_price = COALESCE(:5, unit_price),
-			currency = COALESCE(NULLIF(:6, ''), currency),
-			price_unit = COALESCE(NULLIF(:7, ''), price_unit),
-			service_code_fiscal = :8,
-			updated_at = CURRENT_TIMESTAMP,
-			updated_by = :9
-		WHERE tenant_id = :10 AND id = :11`
+	var columns []ColumnValue
 
-	result, err := r.db.ExecContext(ctx, query,
-		req.Name, req.Description, req.Category, req.Subcategory,
-		req.UnitPrice, req.Currency, string(req.PriceUnit), req.ServiceCodeFiscal,
-		updatedBy, tenantID, id,
-	)
+	if req.Name != "" {
+		columns = append(columns, ColumnValue{Name: "NAME", Value: req.Name})
+	}
+	if req.Description != "" {
+		columns = append(columns, ColumnValue{Name: "DESCRIPTION", Value: req.Description})
+	}
+	if req.Category != "" {
+		columns = append(columns, ColumnValue{Name: "CATEGORY", Value: req.Category})
+	}
+	if req.Subcategory != "" {
+		columns = append(columns, ColumnValue{Name: "SUBCATEGORY", Value: req.Subcategory})
+	}
+	if req.UnitPrice != nil {
+		columns = append(columns, ColumnValue{Name: "UNIT_PRICE", Value: *req.UnitPrice, Type: "NUMBER"})
+	}
+	if req.Currency != "" {
+		columns = append(columns, ColumnValue{Name: "CURRENCY", Value: req.Currency})
+	}
+	if req.PriceUnit != "" {
+		columns = append(columns, ColumnValue{Name: "PRICE_UNIT", Value: string(req.PriceUnit)})
+	}
+	if req.ServiceCodeFiscal != "" {
+		columns = append(columns, ColumnValue{Name: "SERVICE_CODE_FISCAL", Value: req.ServiceCodeFiscal})
+	}
+
+	if len(columns) == 0 {
+		return r.GetByID(ctx, tenantID, id)
+	}
+
+	result, err := r.generic.Update(ctx, TableServices, tenantID, id, columns, updatedBy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update service: %w", err)
 	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	if !result.Success {
+		msg := result.ErrorMessage
+		if msg == "" {
+			msg = "unknown error updating service"
+		}
+		return nil, fmt.Errorf("failed to update service: %s", msg)
 	}
-	if rowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		return nil, sql.ErrNoRows
 	}
 
 	return r.GetByID(ctx, tenantID, id)
 }
 
-// Delete soft-deletes a service
+// Delete soft-deletes a service using dynamic CRUD.
 func (r *ServiceRepository) Delete(ctx context.Context, tenantID string, id int64, deletedBy string) error {
-	query := `UPDATE services SET active = 0, updated_at = CURRENT_TIMESTAMP, updated_by = :1 WHERE tenant_id = :2 AND id = :3`
-	result, err := r.db.ExecContext(ctx, query, deletedBy, tenantID, id)
+	result, err := r.generic.Delete(ctx, TableServices, tenantID, id, true, deletedBy)
 	if err != nil {
 		return fmt.Errorf("failed to delete service: %w", err)
 	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
+	if !result.Success {
+		return fmt.Errorf("failed to delete service: %s", result.ErrorMessage)
 	}
-	if rowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		return sql.ErrNoRows
 	}
-
 	return nil
 }
 
 // GetCategories retrieves distinct categories
+// Stored procedure sp_get_service_categories available for ref cursor usage
 func (r *ServiceRepository) GetCategories(ctx context.Context, tenantID string) ([]string, error) {
 	query := `SELECT DISTINCT category FROM services WHERE tenant_id = :1 AND category IS NOT NULL AND active = 1 ORDER BY category`
 	rows, err := r.db.QueryContext(ctx, query, tenantID)

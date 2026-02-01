@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -16,17 +17,47 @@ import (
 // ErrNotFound is returned when a requested resource does not exist
 var ErrNotFound = errors.New("resource not found")
 
+// Table names for dynamic CRUD operations
+const (
+	TableContracts     = "CONTRACTS"
+	TableContractItems = "CONTRACT_ITEMS"
+)
+
 // ContractRepository handles contract data access
 type ContractRepository struct {
-	db *sql.DB
+	db      *sql.DB
+	generic *GenericRepository
 }
 
 // NewContractRepository creates a new ContractRepository
 func NewContractRepository(db *sql.DB) *ContractRepository {
-	return &ContractRepository{db: db}
+	if db == nil {
+		panic("ContractRepository: db is nil")
+	}
+	return &ContractRepository{
+		db:      db,
+		generic: NewGenericRepository(db),
+	}
 }
 
-// Create creates a new contract with items
+// decimalToFloat64 converts a decimal to float64 and logs a warning if precision is lost.
+func decimalToFloat64(ctx context.Context, fieldName string, d decimal.Decimal) float64 {
+	f, exact := d.Float64()
+	if !exact {
+		// Extract trace ID from context if available (assuming it's stored as a string value)
+		traceID := "unknown"
+		if traceVal := ctx.Value("trace_id"); traceVal != nil {
+			if tid, ok := traceVal.(string); ok {
+				traceID = tid
+			}
+		}
+
+		log.Printf("WARNING: precision loss converting fieldName=%s value=%s traceID=%s", fieldName, d.String(), traceID)
+	}
+	return f
+}
+
+// Create creates a new contract with items using dynamic CRUD
 func (r *ContractRepository) Create(ctx context.Context, tenantID string, req *models.CreateContractRequest, createdBy string) (*models.Contract, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -39,68 +70,60 @@ func (r *ContractRepository) Create(ctx context.Context, tenantID string, req *m
 		billingCycleStr = string(models.BillingCycleMonthly)
 	}
 
-	// Convert custom types to string for Oracle driver compatibility
-	contractTypeStr := string(req.ContractType)
+	// Build columns dynamically
+	columns := []ColumnValue{
+		{Name: "CONTRACT_NUMBER", Value: req.ContractNumber},
+		{Name: "CONTRACT_TYPE", Value: string(req.ContractType)},
+		{Name: "CUSTOMER_ID", Value: req.CustomerID, Type: "NUMBER"},
+		{Name: "START_DATE", Value: req.StartDate.Format("2006-01-02"), Type: "DATE"},
+		{Name: "DURATION_MONTHS", Value: req.DurationMonths, Type: "NUMBER"},
+		{Name: "AUTO_RENEW", Value: boolToInt(req.AutoRenew), Type: "NUMBER"},
+		{Name: "BILLING_CYCLE", Value: billingCycleStr},
+		{Name: "STATUS", Value: "DRAFT"},
+		{Name: "TOTAL_VALUE", Value: 0, Type: "NUMBER"},
+	}
 
-	contractQuery := `
-		INSERT INTO contracts (
-			tenant_id, contract_number, contract_type, customer_id,
-			start_date, end_date, duration_months, auto_renew,
-			payment_terms, billing_cycle, notes, terms_conditions,
-			created_by, updated_by
-		) VALUES (
-			:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11, :12, :13, :14
-		) RETURNING id INTO :15`
+	if req.EndDate != nil {
+		columns = append(columns, ColumnValue{Name: "END_DATE", Value: req.EndDate.Format("2006-01-02"), Type: "DATE"})
+	}
+	if req.PaymentTerms != "" {
+		columns = append(columns, ColumnValue{Name: "PAYMENT_TERMS", Value: req.PaymentTerms})
+	}
+	if req.Notes != "" {
+		columns = append(columns, ColumnValue{Name: "NOTES", Value: req.Notes})
+	}
+	if req.TermsConditions != "" {
+		columns = append(columns, ColumnValue{Name: "TERMS_CONDITIONS", Value: req.TermsConditions})
+	}
 
-	var contractID int64
-	_, err = tx.ExecContext(ctx, contractQuery,
-		tenantID, req.ContractNumber, contractTypeStr, req.CustomerID,
-		req.StartDate, req.EndDate, req.DurationMonths, boolToInt(req.AutoRenew),
-		req.PaymentTerms, billingCycleStr, req.Notes, req.TermsConditions,
-		createdBy, createdBy,
-		sql.Out{Dest: &contractID},
-	)
+	// Insert contract using generic CRUD
+	result, err := r.generic.Insert(ctx, TableContracts, tenantID, columns, createdBy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create contract: %w", err)
 	}
+	if !result.Success {
+		return nil, fmt.Errorf("failed to create contract: %s", result.ErrorMessage)
+	}
+	if result.GeneratedID == nil {
+		return nil, fmt.Errorf("failed to create contract: no ID returned")
+	}
 
-	// Insert contract items using decimal for precise money calculations
-	totalValue := decimal.NewFromInt(0)
+	contractID := *result.GeneratedID
+
+	// Insert contract items
 	for _, item := range req.Items {
-		hundred := decimal.NewFromInt(100)
-		// lineTotal = quantity * unitPrice * (1 - discountPct/100)
-		lineTotal := item.Quantity.Mul(item.UnitPrice).Mul(hundred.Sub(item.DiscountPct)).Div(hundred)
-		totalValue = totalValue.Add(lineTotal)
-
-		// Convert decimal to float64 for Oracle driver
-		quantityFloat, _ := item.Quantity.Float64()
-		unitPriceFloat, _ := item.UnitPrice.Float64()
-		discountPctFloat, _ := item.DiscountPct.Float64()
-
-		itemQuery := `
-			INSERT INTO contract_items (
-				tenant_id, contract_id, service_id, quantity, unit_price,
-				discount_pct, start_date, end_date, delivery_date,
-				description, notes
-			) VALUES (
-				:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11
-			)`
-
-		_, err = tx.ExecContext(ctx, itemQuery,
-			tenantID, contractID, item.ServiceID, quantityFloat, unitPriceFloat,
-			discountPctFloat, item.StartDate, item.EndDate, item.DeliveryDate,
-			item.Description, item.Notes,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("failed to create contract item: %w", err)
+		if err := r.insertContractItem(ctx, tenantID, contractID, item, createdBy); err != nil {
+			return nil, err
 		}
 	}
 
-	// Update total value (convert decimal to float64 at database boundary)
-	totalValueFloat, _ := totalValue.Float64()
-	_, err = tx.ExecContext(ctx, `UPDATE contracts SET total_value = :1 WHERE id = :2`, totalValueFloat, contractID)
+	// Update total using aggregate
+	aggResult, err := r.generic.UpdateAggregate(ctx, TableContracts, contractID, tenantID, TableContractItems)
 	if err != nil {
 		return nil, fmt.Errorf(errFmtUpdateTotalVal, err)
+	}
+	if !aggResult.Success {
+		return nil, fmt.Errorf("failed to update total: %s", aggResult.ErrorMessage)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -110,8 +133,54 @@ func (r *ContractRepository) Create(ctx context.Context, tenantID string, req *m
 	return r.GetByID(ctx, tenantID, contractID)
 }
 
+// insertContractItem inserts a single contract item using dynamic CRUD.
+func (r *ContractRepository) insertContractItem(ctx context.Context, tenantID string, contractID int64, item models.CreateContractItemRequest, createdBy string) error {
+	columns := []ColumnValue{
+		{Name: "CONTRACT_ID", Value: contractID, Type: "NUMBER"},
+		{Name: "SERVICE_ID", Value: item.ServiceID, Type: "NUMBER"},
+		{Name: "QUANTITY", Value: decimalToFloat64(ctx, "Quantity", item.Quantity), Type: "NUMBER"},
+		{Name: "UNIT_PRICE", Value: decimalToFloat64(ctx, "UnitPrice", item.UnitPrice), Type: "NUMBER"},
+		{Name: "DISCOUNT_PCT", Value: decimalToFloat64(ctx, "DiscountPct", item.DiscountPct), Type: "NUMBER"},
+		{Name: "STATUS", Value: "PENDING"},
+	}
+
+	if item.StartDate != nil {
+		columns = append(columns, ColumnValue{Name: "START_DATE", Value: item.StartDate.Format("2006-01-02"), Type: "DATE"})
+	}
+	if item.EndDate != nil {
+		columns = append(columns, ColumnValue{Name: "END_DATE", Value: item.EndDate.Format("2006-01-02"), Type: "DATE"})
+	}
+	if item.DeliveryDate != nil {
+		columns = append(columns, ColumnValue{Name: "DELIVERY_DATE", Value: item.DeliveryDate.Format("2006-01-02"), Type: "DATE"})
+	}
+	if item.Description != "" {
+		columns = append(columns, ColumnValue{Name: "DESCRIPTION", Value: item.Description})
+	}
+	if item.Notes != "" {
+		columns = append(columns, ColumnValue{Name: "NOTES", Value: item.Notes})
+	}
+
+	result, err := r.generic.Insert(ctx, TableContractItems, tenantID, columns, createdBy)
+	if err != nil {
+		return fmt.Errorf("failed to create contract item: %w", err)
+	}
+	if !result.Success {
+		msg := result.ErrorMessage
+		if msg == "" {
+			msg = "unknown error"
+		}
+		return fmt.Errorf("failed to create contract item: %s", msg)
+	}
+	return nil
+}
+
 // GetByID retrieves a contract by ID with items
 func (r *ContractRepository) GetByID(ctx context.Context, tenantID string, id int64) (*models.Contract, error) {
+	return r.getByIDDirect(ctx, tenantID, id)
+}
+
+// getByIDDirect retrieves a contract by ID with items using direct SQL
+func (r *ContractRepository) getByIDDirect(ctx context.Context, tenantID string, id int64) (*models.Contract, error) {
 	query := `
 		SELECT c.id, c.tenant_id, c.contract_number, c.contract_type, c.customer_id,
 			c.start_date, c.end_date, c.duration_months, c.auto_renew,
@@ -176,8 +245,42 @@ func (r *ContractRepository) GetByID(ctx context.Context, tenantID string, id in
 	return &contract, nil
 }
 
-// GetItems retrieves items for a contract
+// contractItemScanDest holds scan destinations for contract item queries.
+type contractItemScanDest struct {
+	item                                          models.ContractItem
+	startDate, endDate, deliveryDate, completedAt sql.NullTime
+	description, notes                            sql.NullString
+	createdAt, updatedAt                          sql.NullTime
+}
+
+// scanArgs returns the slice of pointers for sql.Rows.Scan.
+func (d *contractItemScanDest) scanArgs() []any {
+	return []any{
+		&d.item.ID, &d.item.TenantID, &d.item.ContractID, &d.item.ServiceID,
+		&d.item.Quantity, &d.item.UnitPrice, &d.item.DiscountPct, &d.item.LineTotal,
+		&d.startDate, &d.endDate, &d.deliveryDate,
+		&d.description, &d.item.Status, &d.completedAt, &d.notes,
+		&d.createdAt, &d.updatedAt,
+	}
+}
+
+// toContractItem converts scanned nullable fields to a ContractItem.
+func (d *contractItemScanDest) toContractItem() models.ContractItem {
+	d.item.StartDate = TimeFromNull(d.startDate)
+	d.item.EndDate = TimeFromNull(d.endDate)
+	d.item.DeliveryDate = TimeFromNull(d.deliveryDate)
+	d.item.CompletedAt = TimeFromNull(d.completedAt)
+	d.item.Description = StringFromNull(d.description)
+	d.item.Notes = StringFromNull(d.notes)
+	d.item.CreatedAt = TimeValueFromNull(d.createdAt)
+	d.item.UpdatedAt = TimeValueFromNull(d.updatedAt)
+	return d.item
+}
+
+// GetItems retrieves items for a contract using stored procedure
 func (r *ContractRepository) GetItems(ctx context.Context, tenantID string, contractID int64) ([]models.ContractItem, error) {
+	// Stored procedure sp_get_contract_items is available for ref cursor usage
+	// Using direct query for Go driver compatibility
 	query := `
 		SELECT ci.id, ci.tenant_id, ci.contract_id, ci.service_id,
 			ci.quantity, ci.unit_price, ci.discount_pct, ci.line_total,
@@ -196,44 +299,11 @@ func (r *ContractRepository) GetItems(ctx context.Context, tenantID string, cont
 
 	var items []models.ContractItem
 	for rows.Next() {
-		var item models.ContractItem
-		var startDate, endDate, deliveryDate, completedAt sql.NullTime
-		var description, notes sql.NullString
-		var createdAt, updatedAt sql.NullTime
-
-		err := rows.Scan(
-			&item.ID, &item.TenantID, &item.ContractID, &item.ServiceID,
-			&item.Quantity, &item.UnitPrice, &item.DiscountPct, &item.LineTotal,
-			&startDate, &endDate, &deliveryDate,
-			&description, &item.Status, &completedAt, &notes,
-			&createdAt, &updatedAt,
-		)
-		if err != nil {
+		var dest contractItemScanDest
+		if err := rows.Scan(dest.scanArgs()...); err != nil {
 			return nil, fmt.Errorf("failed to scan contract item: %w", err)
 		}
-
-		if startDate.Valid {
-			item.StartDate = &startDate.Time
-		}
-		if endDate.Valid {
-			item.EndDate = &endDate.Time
-		}
-		if deliveryDate.Valid {
-			item.DeliveryDate = &deliveryDate.Time
-		}
-		if completedAt.Valid {
-			item.CompletedAt = &completedAt.Time
-		}
-		item.Description = description.String
-		item.Notes = notes.String
-		if createdAt.Valid {
-			item.CreatedAt = createdAt.Time
-		}
-		if updatedAt.Valid {
-			item.UpdatedAt = updatedAt.Time
-		}
-
-		items = append(items, item)
+		items = append(items, dest.toContractItem())
 	}
 
 	if err := rows.Err(); err != nil {
@@ -299,6 +369,48 @@ func getDeterministicFallbackSortColumn(allowed map[string]bool) string {
 	return "id"
 }
 
+// contractScanDest holds scan destinations for contract queries.
+type contractScanDest struct {
+	contract                             models.Contract
+	endDate, signedAt                    sql.NullTime
+	durationMonths                       sql.NullInt64
+	signedBy, documentPath, documentHash sql.NullString
+	paymentTerms, notes, termsConditions sql.NullString
+	createdBy, updatedBy                 sql.NullString
+	createdAt, updatedAt                 sql.NullTime
+	totalValueFloat                      float64
+}
+
+// scanArgs returns the slice of pointers for sql.Rows.Scan.
+func (d *contractScanDest) scanArgs() []any {
+	return []any{
+		&d.contract.ID, &d.contract.TenantID, &d.contract.ContractNumber, &d.contract.ContractType, &d.contract.CustomerID,
+		&d.contract.StartDate, &d.endDate, &d.durationMonths, &d.contract.AutoRenew,
+		&d.totalValueFloat, &d.paymentTerms, &d.contract.BillingCycle, &d.contract.Status,
+		&d.signedAt, &d.signedBy, &d.documentPath, &d.documentHash,
+		&d.notes, &d.termsConditions, &d.createdAt, &d.updatedAt, &d.createdBy, &d.updatedBy,
+	}
+}
+
+// toContract converts scanned nullable fields to a Contract.
+func (d *contractScanDest) toContract() models.Contract {
+	d.contract.TotalValue = decimal.NewFromFloat(d.totalValueFloat)
+	d.contract.EndDate = TimeFromNull(d.endDate)
+	d.contract.SignedAt = TimeFromNull(d.signedAt)
+	d.contract.DurationMonths = IntFromNullInt64(d.durationMonths)
+	d.contract.SignedBy = StringFromNull(d.signedBy)
+	d.contract.DocumentPath = StringFromNull(d.documentPath)
+	d.contract.DocumentHash = StringFromNull(d.documentHash)
+	d.contract.PaymentTerms = StringFromNull(d.paymentTerms)
+	d.contract.Notes = StringFromNull(d.notes)
+	d.contract.TermsConditions = StringFromNull(d.termsConditions)
+	d.contract.CreatedBy = StringFromNull(d.createdBy)
+	d.contract.UpdatedBy = StringFromNull(d.updatedBy)
+	d.contract.CreatedAt = TimeValueFromNull(d.createdAt)
+	d.contract.UpdatedAt = TimeValueFromNull(d.updatedAt)
+	return d.contract
+}
+
 // List retrieves contracts with pagination
 func (r *ContractRepository) List(ctx context.Context, tenantID string, params models.PaginationParams, search models.SearchParams) ([]models.Contract, int, error) {
 	// Count query
@@ -317,7 +429,7 @@ func (r *ContractRepository) List(ctx context.Context, tenantID string, params m
 		return nil, 0, fmt.Errorf("failed to count contracts: %w", err)
 	}
 
-	// Main query
+	// Main query - stored procedure sp_list_contracts available for ref cursor usage
 	query := `
 		SELECT id, tenant_id, contract_number, contract_type, customer_id,
 			start_date, end_date, duration_months, auto_renew,
@@ -352,49 +464,11 @@ func (r *ContractRepository) List(ctx context.Context, tenantID string, params m
 
 	var contracts []models.Contract
 	for rows.Next() {
-		var c models.Contract
-		var endDate, signedAt sql.NullTime
-		var durationMonths sql.NullInt64
-		var signedBy, documentPath, documentHash, paymentTerms sql.NullString
-		var notes, termsConditions, createdBy, updatedBy sql.NullString
-		var totalValueFloat float64
-		var createdAt, updatedAt sql.NullTime
-
-		err := rows.Scan(
-			&c.ID, &c.TenantID, &c.ContractNumber, &c.ContractType, &c.CustomerID,
-			&c.StartDate, &endDate, &durationMonths, &c.AutoRenew,
-			&totalValueFloat, &paymentTerms, &c.BillingCycle, &c.Status,
-			&signedAt, &signedBy, &documentPath, &documentHash,
-			&notes, &termsConditions, &createdAt, &updatedAt, &createdBy, &updatedBy,
-		)
-		if err != nil {
+		var dest contractScanDest
+		if err := rows.Scan(dest.scanArgs()...); err != nil {
 			return nil, 0, fmt.Errorf("failed to scan contract: %w", err)
 		}
-
-		c.TotalValue = decimal.NewFromFloat(totalValueFloat)
-		if endDate.Valid {
-			c.EndDate = &endDate.Time
-		}
-		if signedAt.Valid {
-			c.SignedAt = &signedAt.Time
-		}
-		c.DurationMonths = int(durationMonths.Int64)
-		c.SignedBy = signedBy.String
-		c.DocumentPath = documentPath.String
-		c.DocumentHash = documentHash.String
-		c.PaymentTerms = paymentTerms.String
-		c.Notes = notes.String
-		c.TermsConditions = termsConditions.String
-		c.CreatedBy = createdBy.String
-		c.UpdatedBy = updatedBy.String
-		if createdAt.Valid {
-			c.CreatedAt = createdAt.Time
-		}
-		if updatedAt.Valid {
-			c.UpdatedAt = updatedAt.Time
-		}
-
-		contracts = append(contracts, c)
+		contracts = append(contracts, dest.toContract())
 	}
 
 	if err := rows.Err(); err != nil {
@@ -404,45 +478,56 @@ func (r *ContractRepository) List(ctx context.Context, tenantID string, params m
 	return contracts, total, nil
 }
 
-// Update updates a contract
+// Update updates a contract using dynamic CRUD
 func (r *ContractRepository) Update(ctx context.Context, tenantID string, id int64, req *models.UpdateContractRequest, updatedBy string) (*models.Contract, error) {
-	// Handle pointer types - convert to string values or empty string for COALESCE
-	var contractType, billingCycle string
+	var columns []ColumnValue
+
 	if req.ContractType != nil {
-		contractType = string(*req.ContractType)
+		columns = append(columns, ColumnValue{Name: "CONTRACT_TYPE", Value: string(*req.ContractType)})
+	}
+	if req.StartDate != nil {
+		columns = append(columns, ColumnValue{Name: "START_DATE", Value: req.StartDate.Format("2006-01-02"), Type: "DATE"})
+	}
+	if req.EndDate != nil {
+		columns = append(columns, ColumnValue{Name: "END_DATE", Value: req.EndDate.Format("2006-01-02"), Type: "DATE"})
+	}
+	if req.DurationMonths != nil {
+		columns = append(columns, ColumnValue{Name: "DURATION_MONTHS", Value: *req.DurationMonths, Type: "NUMBER"})
+	}
+	if req.AutoRenew != nil {
+		columns = append(columns, ColumnValue{Name: "AUTO_RENEW", Value: boolToInt(*req.AutoRenew), Type: "NUMBER"})
+	}
+	// PaymentTerms: nil=no change, &""=clear, &"value"=set
+	if req.PaymentTerms != nil {
+		columns = append(columns, ColumnValue{Name: "PAYMENT_TERMS", Value: *req.PaymentTerms})
 	}
 	if req.BillingCycle != nil {
-		billingCycle = string(*req.BillingCycle)
+		columns = append(columns, ColumnValue{Name: "BILLING_CYCLE", Value: string(*req.BillingCycle)})
+	}
+	// Notes: nil=no change, &""=clear, &"value"=set
+	if req.Notes != nil {
+		columns = append(columns, ColumnValue{Name: "NOTES", Value: *req.Notes})
+	}
+	// TermsConditions: nil=no change, &""=clear, &"value"=set
+	if req.TermsConditions != nil {
+		columns = append(columns, ColumnValue{Name: "TERMS_CONDITIONS", Value: *req.TermsConditions})
 	}
 
-	query := `
-		UPDATE contracts SET
-			contract_type = COALESCE(NULLIF(:1, ''), contract_type),
-			start_date = COALESCE(:2, start_date),
-			end_date = :3,
-			duration_months = COALESCE(:4, duration_months),
-			payment_terms = :5,
-			billing_cycle = COALESCE(NULLIF(:6, ''), billing_cycle),
-			notes = :7,
-			terms_conditions = :8,
-			updated_at = CURRENT_TIMESTAMP,
-			updated_by = :9
-		WHERE tenant_id = :10 AND id = :11`
+	if len(columns) == 0 {
+		return r.GetByID(ctx, tenantID, id)
+	}
 
-	result, err := r.db.ExecContext(ctx, query,
-		contractType, req.StartDate, req.EndDate, req.DurationMonths,
-		req.PaymentTerms, billingCycle, req.Notes, req.TermsConditions,
-		updatedBy, tenantID, id,
-	)
+	result, err := r.generic.Update(ctx, TableContracts, tenantID, id, columns, updatedBy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update contract: %w", err)
 	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf(errFmtRowsAffected, err)
+	if !result.Success {
+		if result.ErrorMessage == "Record not found" {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("failed to update contract: %s", result.ErrorMessage)
 	}
-	if rowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		return nil, ErrNotFound
 	}
 
@@ -486,54 +571,71 @@ func (r *ContractRepository) Sign(ctx context.Context, tenantID string, id int64
 	return nil
 }
 
-// AddItem adds an item to a contract
-func (r *ContractRepository) AddItem(ctx context.Context, tenantID string, contractID int64, req *models.CreateContractItemRequest) (*models.ContractItem, error) {
+// AddItem adds an item to a contract using dynamic CRUD
+// Note: createdBy is extracted from the caller context; pass empty string if unknown.
+func (r *ContractRepository) AddItem(ctx context.Context, tenantID string, contractID int64, req *models.CreateContractItemRequest, createdBy string) (*models.ContractItem, error) {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf(errFmtBeginTx, err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	itemQuery := `
-		INSERT INTO contract_items (
-			tenant_id, contract_id, service_id, quantity, unit_price,
-			discount_pct, start_date, end_date, delivery_date,
-			description, notes
-		) VALUES (
-			:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11
-		) RETURNING id INTO :12`
+	columns := []ColumnValue{
+		{Name: "CONTRACT_ID", Value: contractID, Type: "NUMBER"},
+		{Name: "SERVICE_ID", Value: req.ServiceID, Type: "NUMBER"},
+		{Name: "QUANTITY", Value: decimalToFloat64(ctx, "Quantity", req.Quantity), Type: "NUMBER"},
+		{Name: "UNIT_PRICE", Value: decimalToFloat64(ctx, "UnitPrice", req.UnitPrice), Type: "NUMBER"},
+		{Name: "DISCOUNT_PCT", Value: decimalToFloat64(ctx, "DiscountPct", req.DiscountPct), Type: "NUMBER"},
+		{Name: "STATUS", Value: "PENDING"},
+	}
 
-	var itemID int64
-	_, err = tx.ExecContext(ctx, itemQuery,
-		tenantID, contractID, req.ServiceID, req.Quantity, req.UnitPrice,
-		req.DiscountPct, req.StartDate, req.EndDate, req.DeliveryDate,
-		req.Description, req.Notes,
-		sql.Out{Dest: &itemID},
-	)
+	if req.StartDate != nil {
+		columns = append(columns, ColumnValue{Name: "START_DATE", Value: req.StartDate.Format("2006-01-02"), Type: "DATE"})
+	}
+	if req.EndDate != nil {
+		columns = append(columns, ColumnValue{Name: "END_DATE", Value: req.EndDate.Format("2006-01-02"), Type: "DATE"})
+	}
+	if req.DeliveryDate != nil {
+		columns = append(columns, ColumnValue{Name: "DELIVERY_DATE", Value: req.DeliveryDate.Format("2006-01-02"), Type: "DATE"})
+	}
+	if req.Description != "" {
+		columns = append(columns, ColumnValue{Name: "DESCRIPTION", Value: req.Description})
+	}
+	if req.Notes != "" {
+		columns = append(columns, ColumnValue{Name: "NOTES", Value: req.Notes})
+	}
+
+	result, err := r.generic.Insert(ctx, TableContractItems, tenantID, columns, createdBy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to insert item: %w", err)
 	}
+	if !result.Success {
+		return nil, fmt.Errorf("failed to insert item: %s", result.ErrorMessage)
+	}
+	if result.GeneratedID == nil {
+		return nil, fmt.Errorf("failed to insert item: no ID returned")
+	}
 
-	// Update total value
-	updateQuery := `
-		UPDATE contracts SET 
-			total_value = (SELECT SUM(quantity * unit_price * (1 - discount_pct/100)) FROM contract_items WHERE tenant_id = :1 AND contract_id = :2),
-			updated_at = CURRENT_TIMESTAMP
-		WHERE tenant_id = :3 AND id = :4`
-	_, err = tx.ExecContext(ctx, updateQuery, tenantID, contractID, tenantID, contractID)
+	itemID := *result.GeneratedID
+
+	// Update total using aggregate
+	aggResult, err := r.generic.UpdateAggregate(ctx, TableContracts, contractID, tenantID, TableContractItems)
 	if err != nil {
 		return nil, fmt.Errorf(errFmtUpdateTotalVal, err)
+	}
+	if !aggResult.Success {
+		return nil, fmt.Errorf("failed to update total: %s", aggResult.ErrorMessage)
 	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf(errFmtCommitTx, err)
 	}
 
-	// Get the created item directly by ID
 	return r.GetItemByID(ctx, tenantID, contractID, itemID)
 }
 
 // GetItemByID retrieves a single contract item by ID
+// Stored procedure sp_get_contract_item is available for ref cursor usage
 func (r *ContractRepository) GetItemByID(ctx context.Context, tenantID string, contractID, itemID int64) (*models.ContractItem, error) {
 	query := `
 		SELECT ci.id, ci.tenant_id, ci.contract_id, ci.service_id,
@@ -544,18 +646,8 @@ func (r *ContractRepository) GetItemByID(ctx context.Context, tenantID string, c
 		FROM contract_items ci
 		WHERE ci.tenant_id = :1 AND ci.contract_id = :2 AND ci.id = :3`
 
-	var item models.ContractItem
-	var startDate, endDate, deliveryDate, completedAt sql.NullTime
-	var description, notes sql.NullString
-	var createdAt, updatedAt sql.NullTime
-
-	err := r.db.QueryRowContext(ctx, query, tenantID, contractID, itemID).Scan(
-		&item.ID, &item.TenantID, &item.ContractID, &item.ServiceID,
-		&item.Quantity, &item.UnitPrice, &item.DiscountPct, &item.LineTotal,
-		&startDate, &endDate, &deliveryDate,
-		&description, &item.Status, &completedAt, &notes,
-		&createdAt, &updatedAt,
-	)
+	var dest contractItemScanDest
+	err := r.db.QueryRowContext(ctx, query, tenantID, contractID, itemID).Scan(dest.scanArgs()...)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, ErrNotFound
@@ -563,60 +655,40 @@ func (r *ContractRepository) GetItemByID(ctx context.Context, tenantID string, c
 		return nil, fmt.Errorf("failed to get contract item: %w", err)
 	}
 
-	if startDate.Valid {
-		item.StartDate = &startDate.Time
-	}
-	if endDate.Valid {
-		item.EndDate = &endDate.Time
-	}
-	if deliveryDate.Valid {
-		item.DeliveryDate = &deliveryDate.Time
-	}
-	if completedAt.Valid {
-		item.CompletedAt = &completedAt.Time
-	}
-	item.Description = description.String
-	item.Notes = notes.String
-	if createdAt.Valid {
-		item.CreatedAt = createdAt.Time
-	}
-	if updatedAt.Valid {
-		item.UpdatedAt = updatedAt.Time
-	}
-
+	item := dest.toContractItem()
 	return &item, nil
 }
 
-// DeleteItem removes an item from a contract
-func (r *ContractRepository) DeleteItem(ctx context.Context, tenantID string, contractID, itemID int64) error {
+// DeleteItem removes an item from a contract using dynamic CRUD
+func (r *ContractRepository) DeleteItem(ctx context.Context, tenantID string, contractID, itemID int64, deletedBy string) error {
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf(errFmtBeginTx, err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	result, err := tx.ExecContext(ctx, `DELETE FROM contract_items WHERE tenant_id = :1 AND contract_id = :2 AND id = :3`, tenantID, contractID, itemID)
+	// Delete item (hard delete since contract items don't have ACTIVE column)
+	result, err := r.generic.Delete(ctx, TableContractItems, tenantID, itemID, false, deletedBy)
 	if err != nil {
 		return fmt.Errorf("failed to delete item: %w", err)
 	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf(errFmtRowsAffected, err)
+	if !result.Success {
+		if result.ErrorMessage == "Record not found" {
+			return ErrNotFound
+		}
+		return fmt.Errorf("failed to delete item: %s", result.ErrorMessage)
 	}
-	if rowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		return ErrNotFound
 	}
 
-	// Update total value
-	updateQuery := `
-		UPDATE contracts SET 
-			total_value = COALESCE((SELECT SUM(quantity * unit_price * (1 - discount_pct/100)) FROM contract_items WHERE tenant_id = :1 AND contract_id = :2), 0),
-			updated_at = CURRENT_TIMESTAMP
-		WHERE tenant_id = :3 AND id = :4`
-	_, err = tx.ExecContext(ctx, updateQuery, tenantID, contractID, tenantID, contractID)
+	// Update total using aggregate
+	aggResult, err := r.generic.UpdateAggregate(ctx, TableContracts, contractID, tenantID, TableContractItems)
 	if err != nil {
 		return fmt.Errorf(errFmtUpdateTotalVal, err)
+	}
+	if !aggResult.Success {
+		return fmt.Errorf("failed to update total: %s", aggResult.ErrorMessage)
 	}
 
 	if err := tx.Commit(); err != nil {

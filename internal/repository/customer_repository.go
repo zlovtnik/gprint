@@ -9,14 +9,24 @@ import (
 	"github.com/zlovtnik/gprint/internal/models"
 )
 
+// TableCustomers is the table name for customers.
+const TableCustomers = "CUSTOMERS"
+
 // CustomerRepository handles customer data access
 type CustomerRepository struct {
-	db *sql.DB
+	db      *sql.DB
+	generic *GenericRepository
 }
 
 // NewCustomerRepository creates a new CustomerRepository
-func NewCustomerRepository(db *sql.DB) *CustomerRepository {
-	return &CustomerRepository{db: db}
+func NewCustomerRepository(db *sql.DB) (*CustomerRepository, error) {
+	if db == nil {
+		return nil, fmt.Errorf("NewCustomerRepository: db is nil")
+	}
+	return &CustomerRepository{
+		db:      db,
+		generic: NewGenericRepository(db),
+	}, nil
 }
 
 // searchCondition holds a SQL condition fragment and its argument
@@ -118,40 +128,86 @@ func scanCustomer(scanner interface{ Scan(...any) error }) (*models.Customer, er
 	return &c, nil
 }
 
-// Create creates a new customer
+// Create creates a new customer using dynamic CRUD
 func (r *CustomerRepository) Create(ctx context.Context, tenantID string, req *models.CreateCustomerRequest, createdBy string) (*models.Customer, error) {
-	// Address is a value type in CreateCustomerRequest
-	address := req.Address
+	columns := []ColumnValue{
+		{Name: "CUSTOMER_CODE", Value: req.CustomerCode},
+		{Name: "CUSTOMER_TYPE", Value: string(req.CustomerType)},
+		{Name: "NAME", Value: req.Name},
+		{Name: "ACTIVE", Value: 1, Type: "NUMBER"},
+	}
 
-	query := `
-		INSERT INTO customers (
-			tenant_id, customer_code, customer_type, name, trade_name,
-			tax_id, state_reg, municipal_reg, email, phone, mobile,
-			address_street, address_number, address_comp, address_district,
-			address_city, address_state, address_zip, address_country,
-			notes, created_by, updated_by
-		) VALUES (
-			:1, :2, :3, :4, :5, :6, :7, :8, :9, :10, :11,
-			:12, :13, :14, :15, :16, :17, :18, :19, :20, :21, :22
-		) RETURNING id INTO :23`
+	if req.TradeName != nil {
+		columns = append(columns, ColumnValue{Name: "TRADE_NAME", Value: *req.TradeName})
+	}
+	if req.TaxID != nil {
+		columns = append(columns, ColumnValue{Name: "TAX_ID", Value: *req.TaxID})
+	}
+	if req.StateReg != nil {
+		columns = append(columns, ColumnValue{Name: "STATE_REG", Value: *req.StateReg})
+	}
+	if req.MunicipalReg != nil {
+		columns = append(columns, ColumnValue{Name: "MUNICIPAL_REG", Value: *req.MunicipalReg})
+	}
+	if req.Email != nil {
+		columns = append(columns, ColumnValue{Name: "EMAIL", Value: *req.Email})
+	}
+	if req.Phone != nil {
+		columns = append(columns, ColumnValue{Name: "PHONE", Value: *req.Phone})
+	}
+	if req.Mobile != nil {
+		columns = append(columns, ColumnValue{Name: "MOBILE", Value: *req.Mobile})
+	}
 
-	var id int64
-	_, err := r.db.ExecContext(ctx, query,
-		tenantID, req.CustomerCode, string(req.CustomerType), req.Name, req.TradeName,
-		req.TaxID, req.StateReg, req.MunicipalReg, req.Email, req.Phone, req.Mobile,
-		address.Street, address.Number, address.Comp, address.District,
-		address.City, address.State, address.Zip, address.Country,
-		req.Notes, createdBy, createdBy,
-		sql.Out{Dest: &id},
-	)
+	// Handle address fields only if Address is provided
+	if req.Address != nil {
+		address := req.Address
+		if address.Street != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_STREET", Value: *address.Street})
+		}
+		if address.Number != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_NUMBER", Value: *address.Number})
+		}
+		if address.Comp != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_COMP", Value: *address.Comp})
+		}
+		if address.District != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_DISTRICT", Value: *address.District})
+		}
+		if address.City != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_CITY", Value: *address.City})
+		}
+		if address.State != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_STATE", Value: *address.State})
+		}
+		if address.Zip != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_ZIP", Value: *address.Zip})
+		}
+		if address.Country != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_COUNTRY", Value: *address.Country})
+		}
+	}
+
+	if req.Notes != nil {
+		columns = append(columns, ColumnValue{Name: "NOTES", Value: *req.Notes})
+	}
+
+	result, err := r.generic.Insert(ctx, TableCustomers, tenantID, columns, createdBy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create customer: %w", err)
 	}
+	if !result.Success {
+		return nil, fmt.Errorf("failed to create customer: %s", result.ErrorMessage)
+	}
+	if result.GeneratedID == nil {
+		return nil, fmt.Errorf("failed to create customer: no ID returned")
+	}
 
-	return r.GetByID(ctx, tenantID, id)
+	return r.GetByID(ctx, tenantID, *result.GeneratedID)
 }
 
 // GetByID retrieves a customer by ID
+// Stored procedure sp_get_customer available for ref cursor usage
 func (r *CustomerRepository) GetByID(ctx context.Context, tenantID string, id int64) (*models.Customer, error) {
 	query := `
 		SELECT id, tenant_id, customer_code, customer_type, name, trade_name,
@@ -211,6 +267,7 @@ func (r *CustomerRepository) countCustomers(ctx context.Context, tenantID string
 }
 
 // fetchCustomers executes the main query with search, sorting, and pagination
+// Stored procedure sp_list_customers available for ref cursor usage
 func (r *CustomerRepository) fetchCustomers(ctx context.Context, tenantID string, conditions []searchCondition, search models.SearchParams, params models.PaginationParams, argIndex int) ([]models.Customer, error) {
 	query := `
 		SELECT id, tenant_id, customer_code, customer_type, name, trade_name,
@@ -253,69 +310,95 @@ func (r *CustomerRepository) fetchCustomers(ctx context.Context, tenantID string
 	return customers, nil
 }
 
-// Update updates a customer
+// Update updates a customer using dynamic CRUD
 func (r *CustomerRepository) Update(ctx context.Context, tenantID string, id int64, req *models.UpdateCustomerRequest, updatedBy string) (*models.Customer, error) {
-	// Address is a value type in UpdateCustomerRequest
-	address := req.Address
+	var columns []ColumnValue
 
-	query := `
-		UPDATE customers SET
-			customer_type = COALESCE(NULLIF(:1, ''), customer_type),
-			name = COALESCE(NULLIF(:2, ''), name),
-			trade_name = :3,
-			tax_id = :4,
-			state_reg = :5,
-			municipal_reg = :6,
-			email = :7,
-			phone = :8,
-			mobile = :9,
-			address_street = COALESCE(NULLIF(:10, ''), address_street),
-			address_number = COALESCE(NULLIF(:11, ''), address_number),
-			address_comp = :12,
-			address_district = COALESCE(NULLIF(:13, ''), address_district),
-			address_city = COALESCE(NULLIF(:14, ''), address_city),
-			address_state = COALESCE(NULLIF(:15, ''), address_state),
-			address_zip = COALESCE(NULLIF(:16, ''), address_zip),
-			address_country = COALESCE(NULLIF(:17, ''), address_country),
-			updated_at = CURRENT_TIMESTAMP,
-			updated_by = :18
-		WHERE tenant_id = :19 AND id = :20`
+	if req.CustomerType != nil {
+		columns = append(columns, ColumnValue{Name: "CUSTOMER_TYPE", Value: string(*req.CustomerType)})
+	}
+	if req.Name != nil {
+		columns = append(columns, ColumnValue{Name: "NAME", Value: *req.Name})
+	}
+	if req.TradeName != nil {
+		columns = append(columns, ColumnValue{Name: "TRADE_NAME", Value: *req.TradeName})
+	}
+	if req.TaxID != nil {
+		columns = append(columns, ColumnValue{Name: "TAX_ID", Value: *req.TaxID})
+	}
+	if req.StateReg != nil {
+		columns = append(columns, ColumnValue{Name: "STATE_REG", Value: *req.StateReg})
+	}
+	if req.MunicipalReg != nil {
+		columns = append(columns, ColumnValue{Name: "MUNICIPAL_REG", Value: *req.MunicipalReg})
+	}
+	if req.Email != nil {
+		columns = append(columns, ColumnValue{Name: "EMAIL", Value: *req.Email})
+	}
+	if req.Phone != nil {
+		columns = append(columns, ColumnValue{Name: "PHONE", Value: *req.Phone})
+	}
+	if req.Mobile != nil {
+		columns = append(columns, ColumnValue{Name: "MOBILE", Value: *req.Mobile})
+	}
 
-	result, err := r.db.ExecContext(ctx, query,
-		string(req.CustomerType), req.Name, req.TradeName, req.TaxID,
-		req.StateReg, req.MunicipalReg, req.Email, req.Phone, req.Mobile,
-		address.Street, address.Number, address.Comp, address.District,
-		address.City, address.State, address.Zip, address.Country,
-		updatedBy, tenantID, id,
-	)
+	// Handle address fields only if Address is provided (nil = no change)
+	if req.Address != nil {
+		address := req.Address
+		if address.Street != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_STREET", Value: *address.Street})
+		}
+		if address.Number != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_NUMBER", Value: *address.Number})
+		}
+		if address.Comp != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_COMP", Value: *address.Comp})
+		}
+		if address.District != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_DISTRICT", Value: *address.District})
+		}
+		if address.City != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_CITY", Value: *address.City})
+		}
+		if address.State != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_STATE", Value: *address.State})
+		}
+		if address.Zip != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_ZIP", Value: *address.Zip})
+		}
+		if address.Country != nil {
+			columns = append(columns, ColumnValue{Name: "ADDRESS_COUNTRY", Value: *address.Country})
+		}
+	}
+
+	if len(columns) == 0 {
+		return r.GetByID(ctx, tenantID, id)
+	}
+
+	result, err := r.generic.Update(ctx, TableCustomers, tenantID, id, columns, updatedBy)
 	if err != nil {
 		return nil, fmt.Errorf("failed to update customer: %w", err)
 	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get rows affected: %w", err)
+	if !result.Success {
+		return nil, fmt.Errorf("failed to update customer: %s", result.ErrorMessage)
 	}
-	if rowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		return nil, fmt.Errorf("customer not found: tenant=%s id=%d", tenantID, id)
 	}
 
 	return r.GetByID(ctx, tenantID, id)
 }
 
-// Delete soft-deletes a customer
+// Delete soft-deletes a customer using dynamic CRUD
 func (r *CustomerRepository) Delete(ctx context.Context, tenantID string, id int64, deletedBy string) error {
-	query := `UPDATE customers SET active = 0, updated_at = CURRENT_TIMESTAMP, updated_by = :1 WHERE tenant_id = :2 AND id = :3`
-	result, err := r.db.ExecContext(ctx, query, deletedBy, tenantID, id)
+	result, err := r.generic.Delete(ctx, TableCustomers, tenantID, id, true, deletedBy)
 	if err != nil {
 		return fmt.Errorf("failed to delete customer: %w", err)
 	}
-
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %w", err)
+	if !result.Success {
+		return fmt.Errorf("failed to delete customer: %s", result.ErrorMessage)
 	}
-	if rowsAffected == 0 {
+	if result.RowsAffected == 0 {
 		return fmt.Errorf("customer not found: tenant=%s id=%d", tenantID, id)
 	}
 	return nil
