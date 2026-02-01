@@ -152,11 +152,11 @@ func (r *PrintJobRepository) UpdateStatus(ctx context.Context, tenantID string, 
 			file_size = :3,
 			page_count = :4,
 			error_message = :5,
-			started_at = CASE WHEN :1 = 'PROCESSING' AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
-			completed_at = CASE WHEN :1 IN ('COMPLETED', 'FAILED') THEN CURRENT_TIMESTAMP ELSE completed_at END
-		WHERE tenant_id = :6 AND id = :7`
+			started_at = CASE WHEN :6 = 'PROCESSING' AND started_at IS NULL THEN CURRENT_TIMESTAMP ELSE started_at END,
+			completed_at = CASE WHEN :7 IN ('COMPLETED', 'FAILED') THEN CURRENT_TIMESTAMP ELSE completed_at END
+		WHERE tenant_id = :8 AND id = :9`
 
-	result, err := r.db.ExecContext(ctx, query, string(status), outputPath, fileSize, pageCount, errorMsg, tenantID, id)
+	result, err := r.db.ExecContext(ctx, query, string(status), outputPath, fileSize, pageCount, errorMsg, string(status), string(status), tenantID, id)
 	if err != nil {
 		return fmt.Errorf("failed to update print job status: %w", err)
 	}

@@ -502,15 +502,22 @@ func (r *ContractGenerationRepository) ListTemplates(
 	for rows.Next() {
 		var t models.ContractTemplate
 		var isDefault, active int
+		var createdAt, updatedAt sql.NullTime
 		err := rows.Scan(
 			&t.ID, &t.TenantID, &t.TemplateCode, &t.TemplateName, &t.Language,
-			&isDefault, &active, &t.Version, &t.CreatedAt, &t.UpdatedAt,
+			&isDefault, &active, &t.Version, &createdAt, &updatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan template: %w", err)
 		}
 		t.IsDefault = isDefault == 1
 		t.Active = active == 1
+		if createdAt.Valid {
+			t.CreatedAt = createdAt.Time
+		}
+		if updatedAt.Valid {
+			t.UpdatedAt = updatedAt.Time
+		}
 		templates = append(templates, t)
 	}
 

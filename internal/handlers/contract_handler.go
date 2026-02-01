@@ -327,7 +327,6 @@ func (h *ContractHandler) DeleteItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Return 204 No Content for successful deletion
 	w.WriteHeader(http.StatusNoContent)
 }
 

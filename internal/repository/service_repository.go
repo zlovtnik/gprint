@@ -68,15 +68,16 @@ func (r *ServiceRepository) GetByID(ctx context.Context, tenantID string, id int
 	var s models.Service
 	var description, category, subcategory, serviceCodeFiscal sql.NullString
 	var notes, createdBy, updatedBy sql.NullString
+	var createdAt, updatedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, query, tenantID, id).Scan(
 		&s.ID, &s.TenantID, &s.ServiceCode, &s.Name, &description, &category, &subcategory,
 		&s.UnitPrice, &s.Currency, &s.PriceUnit, &serviceCodeFiscal,
 		&s.ISSRate, &s.IRRFRate, &s.PISRate, &s.COFINSRate, &s.CSLLRate,
-		&s.Active, &notes, &s.CreatedAt, &s.UpdatedAt, &createdBy, &updatedBy,
+		&s.Active, &notes, &createdAt, &updatedAt, &createdBy, &updatedBy,
 	)
 	if err == sql.ErrNoRows {
-		return nil, nil
+		return nil, sql.ErrNoRows
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get service: %w", err)
@@ -89,6 +90,12 @@ func (r *ServiceRepository) GetByID(ctx context.Context, tenantID string, id int
 	s.Notes = notes.String
 	s.CreatedBy = createdBy.String
 	s.UpdatedBy = updatedBy.String
+	if createdAt.Valid {
+		s.CreatedAt = createdAt.Time
+	}
+	if updatedAt.Valid {
+		s.UpdatedAt = updatedAt.Time
+	}
 
 	return &s, nil
 }
@@ -182,12 +189,13 @@ func (r *ServiceRepository) List(ctx context.Context, tenantID string, params mo
 		var s models.Service
 		var description, category, subcategory, serviceCodeFiscal sql.NullString
 		var notes, createdBy, updatedBy sql.NullString
+		var createdAt, updatedAt sql.NullTime
 
 		err := rows.Scan(
 			&s.ID, &s.TenantID, &s.ServiceCode, &s.Name, &description, &category, &subcategory,
 			&s.UnitPrice, &s.Currency, &s.PriceUnit, &serviceCodeFiscal,
 			&s.ISSRate, &s.IRRFRate, &s.PISRate, &s.COFINSRate, &s.CSLLRate,
-			&s.Active, &notes, &s.CreatedAt, &s.UpdatedAt, &createdBy, &updatedBy,
+			&s.Active, &notes, &createdAt, &updatedAt, &createdBy, &updatedBy,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan service: %w", err)
@@ -200,6 +208,12 @@ func (r *ServiceRepository) List(ctx context.Context, tenantID string, params mo
 		s.Notes = notes.String
 		s.CreatedBy = createdBy.String
 		s.UpdatedBy = updatedBy.String
+		if createdAt.Valid {
+			s.CreatedAt = createdAt.Time
+		}
+		if updatedAt.Valid {
+			s.UpdatedAt = updatedAt.Time
+		}
 
 		services = append(services, s)
 	}
@@ -241,7 +255,7 @@ func (r *ServiceRepository) Update(ctx context.Context, tenantID string, id int6
 		return nil, fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rowsAffected == 0 {
-		return nil, nil // or return a specific "not found" error
+		return nil, sql.ErrNoRows
 	}
 
 	return r.GetByID(ctx, tenantID, id)

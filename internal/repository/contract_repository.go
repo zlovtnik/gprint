@@ -127,13 +127,14 @@ func (r *ContractRepository) GetByID(ctx context.Context, tenantID string, id in
 	var signedBy, documentPath, documentHash, paymentTerms sql.NullString
 	var notes, termsConditions, createdBy, updatedBy sql.NullString
 	var totalValueFloat float64
+	var createdAt, updatedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, query, tenantID, id).Scan(
 		&contract.ID, &contract.TenantID, &contract.ContractNumber, &contract.ContractType, &contract.CustomerID,
 		&contract.StartDate, &endDate, &durationMonths, &contract.AutoRenew,
 		&totalValueFloat, &paymentTerms, &contract.BillingCycle, &contract.Status,
 		&signedAt, &signedBy, &documentPath, &documentHash,
-		&notes, &termsConditions, &contract.CreatedAt, &contract.UpdatedAt, &createdBy, &updatedBy,
+		&notes, &termsConditions, &createdAt, &updatedAt, &createdBy, &updatedBy,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -158,6 +159,12 @@ func (r *ContractRepository) GetByID(ctx context.Context, tenantID string, id in
 	contract.TermsConditions = termsConditions.String
 	contract.CreatedBy = createdBy.String
 	contract.UpdatedBy = updatedBy.String
+	if createdAt.Valid {
+		contract.CreatedAt = createdAt.Time
+	}
+	if updatedAt.Valid {
+		contract.UpdatedAt = updatedAt.Time
+	}
 
 	// Get items
 	items, err := r.GetItems(ctx, tenantID, id)
@@ -192,13 +199,14 @@ func (r *ContractRepository) GetItems(ctx context.Context, tenantID string, cont
 		var item models.ContractItem
 		var startDate, endDate, deliveryDate, completedAt sql.NullTime
 		var description, notes sql.NullString
+		var createdAt, updatedAt sql.NullTime
 
 		err := rows.Scan(
 			&item.ID, &item.TenantID, &item.ContractID, &item.ServiceID,
 			&item.Quantity, &item.UnitPrice, &item.DiscountPct, &item.LineTotal,
 			&startDate, &endDate, &deliveryDate,
 			&description, &item.Status, &completedAt, &notes,
-			&item.CreatedAt, &item.UpdatedAt,
+			&createdAt, &updatedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan contract item: %w", err)
@@ -218,6 +226,12 @@ func (r *ContractRepository) GetItems(ctx context.Context, tenantID string, cont
 		}
 		item.Description = description.String
 		item.Notes = notes.String
+		if createdAt.Valid {
+			item.CreatedAt = createdAt.Time
+		}
+		if updatedAt.Valid {
+			item.UpdatedAt = updatedAt.Time
+		}
 
 		items = append(items, item)
 	}
@@ -344,13 +358,14 @@ func (r *ContractRepository) List(ctx context.Context, tenantID string, params m
 		var signedBy, documentPath, documentHash, paymentTerms sql.NullString
 		var notes, termsConditions, createdBy, updatedBy sql.NullString
 		var totalValueFloat float64
+		var createdAt, updatedAt sql.NullTime
 
 		err := rows.Scan(
 			&c.ID, &c.TenantID, &c.ContractNumber, &c.ContractType, &c.CustomerID,
 			&c.StartDate, &endDate, &durationMonths, &c.AutoRenew,
 			&totalValueFloat, &paymentTerms, &c.BillingCycle, &c.Status,
 			&signedAt, &signedBy, &documentPath, &documentHash,
-			&notes, &termsConditions, &c.CreatedAt, &c.UpdatedAt, &createdBy, &updatedBy,
+			&notes, &termsConditions, &createdAt, &updatedAt, &createdBy, &updatedBy,
 		)
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan contract: %w", err)
@@ -372,6 +387,12 @@ func (r *ContractRepository) List(ctx context.Context, tenantID string, params m
 		c.TermsConditions = termsConditions.String
 		c.CreatedBy = createdBy.String
 		c.UpdatedBy = updatedBy.String
+		if createdAt.Valid {
+			c.CreatedAt = createdAt.Time
+		}
+		if updatedAt.Valid {
+			c.UpdatedAt = updatedAt.Time
+		}
 
 		contracts = append(contracts, c)
 	}
@@ -526,13 +547,14 @@ func (r *ContractRepository) GetItemByID(ctx context.Context, tenantID string, c
 	var item models.ContractItem
 	var startDate, endDate, deliveryDate, completedAt sql.NullTime
 	var description, notes sql.NullString
+	var createdAt, updatedAt sql.NullTime
 
 	err := r.db.QueryRowContext(ctx, query, tenantID, contractID, itemID).Scan(
 		&item.ID, &item.TenantID, &item.ContractID, &item.ServiceID,
 		&item.Quantity, &item.UnitPrice, &item.DiscountPct, &item.LineTotal,
 		&startDate, &endDate, &deliveryDate,
 		&description, &item.Status, &completedAt, &notes,
-		&item.CreatedAt, &item.UpdatedAt,
+		&createdAt, &updatedAt,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -555,6 +577,12 @@ func (r *ContractRepository) GetItemByID(ctx context.Context, tenantID string, c
 	}
 	item.Description = description.String
 	item.Notes = notes.String
+	if createdAt.Valid {
+		item.CreatedAt = createdAt.Time
+	}
+	if updatedAt.Valid {
+		item.UpdatedAt = updatedAt.Time
+	}
 
 	return &item, nil
 }

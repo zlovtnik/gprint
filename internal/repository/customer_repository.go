@@ -75,13 +75,14 @@ func scanCustomer(scanner interface{ Scan(...any) error }) (*models.Customer, er
 	var tradeName, taxID, stateReg, municipalReg, email, phone, mobile sql.NullString
 	var street, number, comp, district, city, state, zip, country sql.NullString
 	var notes, createdBy, updatedBy sql.NullString
+	var createdAt, updatedAt sql.NullTime
 
 	err := scanner.Scan(
 		&c.ID, &c.TenantID, &c.CustomerCode, &c.CustomerType, &c.Name, &tradeName,
 		&taxID, &stateReg, &municipalReg, &email, &phone, &mobile,
 		&street, &number, &comp, &district,
 		&city, &state, &zip, &country,
-		&c.Active, &notes, &c.CreatedAt, &c.UpdatedAt, &createdBy, &updatedBy,
+		&c.Active, &notes, &createdAt, &updatedAt, &createdBy, &updatedBy,
 	)
 	if err != nil {
 		return nil, err
@@ -107,6 +108,12 @@ func scanCustomer(scanner interface{ Scan(...any) error }) (*models.Customer, er
 	c.Notes = notes.String
 	c.CreatedBy = createdBy.String
 	c.UpdatedBy = updatedBy.String
+	if createdAt.Valid {
+		c.CreatedAt = createdAt.Time
+	}
+	if updatedAt.Valid {
+		c.UpdatedAt = updatedAt.Time
+	}
 
 	return &c, nil
 }

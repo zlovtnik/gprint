@@ -151,5 +151,5 @@ func (h *CustomerHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	writeJSON(w, http.StatusOK, models.SuccessResponse(nil))
 }

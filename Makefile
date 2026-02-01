@@ -1,8 +1,10 @@
-.PHONY: build build-fast run test clean docker-build docker-run lint fmt deps
+.PHONY: build build-fast build-ui run test clean docker-build docker-run lint fmt deps ui
 
 # Binary name
 BINARY=gprint
+UI_BINARY=gprint-ui
 MAIN_PATH=./cmd/server
+UI_PATH=./cmd/ui
 
 # Go parameters
 GOCMD=go
@@ -36,6 +38,11 @@ build-fast:
 	@mkdir -p bin
 	$(GOBUILD) -o bin/$(BINARY) $(MAIN_PATH)
 
+# Build the UI application
+build-ui:
+	@mkdir -p bin
+	$(GOBUILD) $(BUILDFLAGS) -o bin/$(UI_BINARY) $(UI_PATH)
+
 # Build for Linux (for Docker)
 build-linux:
 	@mkdir -p bin
@@ -49,6 +56,10 @@ run:
 	else \
 		DYLD_LIBRARY_PATH=$(CURDIR)/lib TNS_ADMIN=$(CURDIR)/wallet $(GORUN) $(MAIN_PATH); \
 	fi
+
+# Run the UI application
+ui:
+	$(GORUN) $(UI_PATH)
 
 # Run with hot reload (requires air: go install github.com/cosmtrek/air@latest)
 dev:
@@ -112,8 +123,10 @@ help:
 	@echo "  all           - Run deps, lint, test, and build"
 	@echo "  deps          - Download and tidy dependencies"
 	@echo "  build         - Build the application"
+	@echo "  build-ui      - Build the UI application"
 	@echo "  build-linux   - Build for Linux (Docker)"
 	@echo "  run           - Run the application"
+	@echo "  ui            - Run the UI application"
 	@echo "  dev           - Run with hot reload (requires air)"
 	@echo "  test          - Run tests"
 	@echo "  test-coverage - Run tests with coverage report"
