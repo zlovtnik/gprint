@@ -2,110 +2,85 @@
 
 ## Architecture Overview
 
-Go microservice for contract printing management. Uses a **layered architecture**:
+Go microservice for contract printing management (services-only, multi-tenant). Uses a **layered architecture**:
 
 ```
 handlers → service → repository → Oracle DB
 ```
 
-- **Handlers** (`internal/handlers/`): HTTP request handling, JSON serialization, error responses
-- **Service** (`internal/service/`): Business logic, coordinates repositories  
-- **Repository** (`internal/repository/`): Raw SQL with `database/sql`, no ORM
-- **Models** (`internal/models/`): Domain entities + Request/Response DTOs
+- **Handlers** in [internal/handlers](internal/handlers): HTTP request handling, JSON serialization, error responses.
+- **Service** in [internal/service](internal/service): business logic, orchestrates repository calls.
+- **Repository** in [internal/repository](internal/repository): raw SQL via `database/sql`, Oracle positional params (`:1`, `:2`).
+- **Models** in [internal/models](internal/models): domain entities + request/response DTOs.
 
-Multi-tenant isolation: All data operations require `tenant_id` from JWT claims.
+Multi-tenant isolation: every data access must filter by `tenant_id` from JWT claims.
 
-## Key Conventions
+## Critical Conventions & Patterns
 
 ### Handler Pattern
 
 ```go
 func (h *CustomerHandler) Get(w http.ResponseWriter, r *http.Request) {
     tenantID := middleware.GetTenantID(r.Context())  // Always extract first
-    id, err := parseIDFromPath(r, "id")              // Shared helper in internal/handlers/helpers.go
+    id, err := parseIDFromPath(r, "id")              // helpers.go
     // ... call service, use writeJSON() or writeError()
 }
 ```
 
-- Use `middleware.GetTenantID(ctx)` and `middleware.GetUser(ctx)` for auth context
-- Use `writeJSON(w, status, data)` and `writeError(w, status, code, msg)` helpers (defined in `customer_handler.go`)
-- Error codes/messages defined in `internal/handlers/errors.go`
-- Handler constructors panic on nil dependencies for fail-fast startup
+- Use `middleware.GetTenantID(ctx)` and `middleware.GetUser(ctx)` for auth context.
+- Response helpers `writeJSON()` / `writeError()` live in [internal/handlers/customer_handler.go](internal/handlers/customer_handler.go).
+- Error codes/messages in [internal/handlers/errors.go](internal/handlers/errors.go).
+- Handler constructors should panic on nil dependencies (fail-fast).
 
 ### Model Pattern
 
-Each entity has 3-4 types in `internal/models/`:
-- `Customer` - full domain model with all fields including `tenant_id`
-- `CreateCustomerRequest` / `UpdateCustomerRequest` - input DTOs
-- `CustomerResponse` - output DTO (excludes `tenant_id`, internal audit fields)
-- Use `entity.ToResponse()` method to convert domain → response
+Each entity has 3–4 types under [internal/models](internal/models):
+
+- `Entity` (full domain, includes `tenant_id`), `CreateEntityRequest`, `UpdateEntityRequest`, `EntityResponse`.
+- Convert domain → response via `entity.ToResponse()`.
 
 ### Repository Pattern
 
-- Raw SQL with Oracle positional params (`:1`, `:2`)
-- Use `sql.NullString` for nullable columns, convert to struct fields after `Scan()`
-- **All queries must filter by `tenant_id`** for multi-tenant isolation
-- Use `scanCustomer()` pattern to handle nullable fields consistently
+- Always include `tenant_id` filters in SQL queries.
+- Use `sql.NullString` for nullable columns and a `scanX()` helper for consistent `Scan()` handling.
 
 ### API Response Format
 
 ```go
-// Success: wrap data with models.SuccessResponse()
-writeJSON(w, http.StatusOK, models.SuccessResponse(customer.ToResponse()))
-
-// Error: use writeError() which calls models.ErrorResponse()
+writeJSON(w, http.StatusOK, models.SuccessResponse(entity.ToResponse()))
 writeError(w, http.StatusNotFound, ErrCodeNotFound, MsgCustomerNotFound)
-
-// Paginated lists: use models.NewPaginatedResponse()
 result := models.NewPaginatedResponse(responses, params.Page, params.PageSize, total)
 ```
 
 ### Routing
 
-Go 1.22+ routing with method prefix: `"METHOD /path/{param}"`
+Go 1.22+ method-based routing in [internal/router/router.go](internal/router/router.go):
 
 ```go
 r.mux.HandleFunc("GET /api/v1/customers/{id}", h.Get)
 r.mux.HandleFunc("POST /api/v1/contracts/{id}/print", h.CreateJob)
 ```
 
-Health endpoints (`/health`, `/ready`) bypass auth middleware.
+Health endpoints `/health` and `/ready` bypass auth middleware.
 
-## Development Commands
+## Integration Points
 
-```bash
-make run     # Run locally (auto-sets Oracle Instant Client paths)
-make dev     # Hot reload with air (go install github.com/cosmtrek/air@latest)
-make test    # Tests with race detection
-make lint    # Requires golangci-lint
-```
+- Oracle DB (19c+) using `godror` driver; Instant Client libs live under [lib](lib) (macOS) and [lib-linux](lib-linux).
+- External Rust/Actix-Web auth service issues JWTs; HS256 validation in [pkg/auth/jwt.go](pkg/auth/jwt.go).
+- Tenant and user claims are added to context in [internal/middleware/auth.go](internal/middleware/auth.go).
 
-**Oracle Instant Client**: Libraries in `./lib/` (macOS) and `./lib-linux/` (Linux). Makefile auto-sets:
-- macOS: `DYLD_LIBRARY_PATH`
-- Linux: `LD_LIBRARY_PATH`
-- `TNS_ADMIN` → `./wallet/`
+## Developer Workflows
 
-## Environment Variables
+- `make run` (auto-sets Instant Client env: `DYLD_LIBRARY_PATH`/`LD_LIBRARY_PATH`, `TNS_ADMIN` → [wallet](wallet)).
+- `make dev` for hot reload (requires `air`).
+- `make test`, `make test-coverage`, `make lint`.
+- Migrations in [migrations](migrations) are Oracle SQL scripts (see [README.md](README.md)).
 
-**Required:**
-- `JWT_SECRET` - HMAC secret for HS256 token validation
-- `ORACLE_USER`, `ORACLE_PASSWORD`
+## Adding a New Entity (Order Matters)
 
-**Oracle Cloud (ADB):**
-- `ORACLE_WALLET_PATH`, `ORACLE_TNS_ALIAS`
-
-## Authentication
-
-JWT validation only (tokens issued by external Rust/Actix-Web auth service):
-- Algorithm: HS256 (symmetric) via `pkg/auth/jwt.go` (Keycloak integration in `pkg/auth/keycloak.go`)
-- Claims: `user`, `tenant_id`, `login_session`
-- Middleware extracts to context in `internal/middleware/auth.go`
-
-## Adding a New Entity
-
-1. **Models** in `internal/models/entity.go`: Entity, CreateRequest, UpdateRequest, Response + `ToResponse()` method
-2. **Repository** in `internal/repository/entity_repository.go`: CRUD with tenant isolation
-3. **Service** in `internal/service/entity_service.go`: business logic, error wrapping
-4. **Handler** in `internal/handlers/entity_handler.go`: HTTP handlers, validation
-5. **Routes** in `internal/router/router.go`: register endpoints
-6. **Wire up** in `cmd/server/main.go`: add to `repositories`, `services`, `handlerSet` structs
+1. Add models in [internal/models](internal/models) with `ToResponse()`.
+2. Add repository in [internal/repository](internal/repository) (tenant filters + `scanX()`).
+3. Add service in [internal/service](internal/service).
+4. Add handler in [internal/handlers](internal/handlers).
+5. Register routes in [internal/router/router.go](internal/router/router.go).
+6. Wire in [cmd/server/main.go](cmd/server/main.go).

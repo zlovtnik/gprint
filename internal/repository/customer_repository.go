@@ -18,6 +18,35 @@ type CustomerRepository struct {
 	generic *GenericRepository
 }
 
+func appendOptionalStringColumn(columns []ColumnValue, name string, value *string) []ColumnValue {
+	if value == nil {
+		return columns
+	}
+	return append(columns, ColumnValue{Name: name, Value: *value})
+}
+
+func appendOptionalCustomerTypeColumn(columns []ColumnValue, name string, value *models.CustomerType) []ColumnValue {
+	if value == nil {
+		return columns
+	}
+	return append(columns, ColumnValue{Name: name, Value: string(*value)})
+}
+
+func appendAddressColumns(columns []ColumnValue, address *models.AddressInput) []ColumnValue {
+	if address == nil {
+		return columns
+	}
+	columns = appendOptionalStringColumn(columns, "ADDRESS_STREET", address.Street)
+	columns = appendOptionalStringColumn(columns, "ADDRESS_NUMBER", address.Number)
+	columns = appendOptionalStringColumn(columns, "ADDRESS_COMP", address.Comp)
+	columns = appendOptionalStringColumn(columns, "ADDRESS_DISTRICT", address.District)
+	columns = appendOptionalStringColumn(columns, "ADDRESS_CITY", address.City)
+	columns = appendOptionalStringColumn(columns, "ADDRESS_STATE", address.State)
+	columns = appendOptionalStringColumn(columns, "ADDRESS_ZIP", address.Zip)
+	columns = appendOptionalStringColumn(columns, "ADDRESS_COUNTRY", address.Country)
+	return columns
+}
+
 // NewCustomerRepository creates a new CustomerRepository
 func NewCustomerRepository(db *sql.DB) (*CustomerRepository, error) {
 	if db == nil {
@@ -137,60 +166,15 @@ func (r *CustomerRepository) Create(ctx context.Context, tenantID string, req *m
 		{Name: "ACTIVE", Value: 1, Type: "NUMBER"},
 	}
 
-	if req.TradeName != nil {
-		columns = append(columns, ColumnValue{Name: "TRADE_NAME", Value: *req.TradeName})
-	}
-	if req.TaxID != nil {
-		columns = append(columns, ColumnValue{Name: "TAX_ID", Value: *req.TaxID})
-	}
-	if req.StateReg != nil {
-		columns = append(columns, ColumnValue{Name: "STATE_REG", Value: *req.StateReg})
-	}
-	if req.MunicipalReg != nil {
-		columns = append(columns, ColumnValue{Name: "MUNICIPAL_REG", Value: *req.MunicipalReg})
-	}
-	if req.Email != nil {
-		columns = append(columns, ColumnValue{Name: "EMAIL", Value: *req.Email})
-	}
-	if req.Phone != nil {
-		columns = append(columns, ColumnValue{Name: "PHONE", Value: *req.Phone})
-	}
-	if req.Mobile != nil {
-		columns = append(columns, ColumnValue{Name: "MOBILE", Value: *req.Mobile})
-	}
-
-	// Handle address fields only if Address is provided
-	if req.Address != nil {
-		address := req.Address
-		if address.Street != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_STREET", Value: *address.Street})
-		}
-		if address.Number != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_NUMBER", Value: *address.Number})
-		}
-		if address.Comp != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_COMP", Value: *address.Comp})
-		}
-		if address.District != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_DISTRICT", Value: *address.District})
-		}
-		if address.City != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_CITY", Value: *address.City})
-		}
-		if address.State != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_STATE", Value: *address.State})
-		}
-		if address.Zip != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_ZIP", Value: *address.Zip})
-		}
-		if address.Country != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_COUNTRY", Value: *address.Country})
-		}
-	}
-
-	if req.Notes != nil {
-		columns = append(columns, ColumnValue{Name: "NOTES", Value: *req.Notes})
-	}
+	columns = appendOptionalStringColumn(columns, "TRADE_NAME", req.TradeName)
+	columns = appendOptionalStringColumn(columns, "TAX_ID", req.TaxID)
+	columns = appendOptionalStringColumn(columns, "STATE_REG", req.StateReg)
+	columns = appendOptionalStringColumn(columns, "MUNICIPAL_REG", req.MunicipalReg)
+	columns = appendOptionalStringColumn(columns, "EMAIL", req.Email)
+	columns = appendOptionalStringColumn(columns, "PHONE", req.Phone)
+	columns = appendOptionalStringColumn(columns, "MOBILE", req.Mobile)
+	columns = appendAddressColumns(columns, req.Address)
+	columns = appendOptionalStringColumn(columns, "NOTES", req.Notes)
 
 	result, err := r.generic.Insert(ctx, TableCustomers, tenantID, columns, createdBy)
 	if err != nil {
@@ -314,62 +298,16 @@ func (r *CustomerRepository) fetchCustomers(ctx context.Context, tenantID string
 func (r *CustomerRepository) Update(ctx context.Context, tenantID string, id int64, req *models.UpdateCustomerRequest, updatedBy string) (*models.Customer, error) {
 	var columns []ColumnValue
 
-	if req.CustomerType != nil {
-		columns = append(columns, ColumnValue{Name: "CUSTOMER_TYPE", Value: string(*req.CustomerType)})
-	}
-	if req.Name != nil {
-		columns = append(columns, ColumnValue{Name: "NAME", Value: *req.Name})
-	}
-	if req.TradeName != nil {
-		columns = append(columns, ColumnValue{Name: "TRADE_NAME", Value: *req.TradeName})
-	}
-	if req.TaxID != nil {
-		columns = append(columns, ColumnValue{Name: "TAX_ID", Value: *req.TaxID})
-	}
-	if req.StateReg != nil {
-		columns = append(columns, ColumnValue{Name: "STATE_REG", Value: *req.StateReg})
-	}
-	if req.MunicipalReg != nil {
-		columns = append(columns, ColumnValue{Name: "MUNICIPAL_REG", Value: *req.MunicipalReg})
-	}
-	if req.Email != nil {
-		columns = append(columns, ColumnValue{Name: "EMAIL", Value: *req.Email})
-	}
-	if req.Phone != nil {
-		columns = append(columns, ColumnValue{Name: "PHONE", Value: *req.Phone})
-	}
-	if req.Mobile != nil {
-		columns = append(columns, ColumnValue{Name: "MOBILE", Value: *req.Mobile})
-	}
-
-	// Handle address fields only if Address is provided (nil = no change)
-	if req.Address != nil {
-		address := req.Address
-		if address.Street != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_STREET", Value: *address.Street})
-		}
-		if address.Number != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_NUMBER", Value: *address.Number})
-		}
-		if address.Comp != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_COMP", Value: *address.Comp})
-		}
-		if address.District != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_DISTRICT", Value: *address.District})
-		}
-		if address.City != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_CITY", Value: *address.City})
-		}
-		if address.State != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_STATE", Value: *address.State})
-		}
-		if address.Zip != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_ZIP", Value: *address.Zip})
-		}
-		if address.Country != nil {
-			columns = append(columns, ColumnValue{Name: "ADDRESS_COUNTRY", Value: *address.Country})
-		}
-	}
+	columns = appendOptionalCustomerTypeColumn(columns, "CUSTOMER_TYPE", req.CustomerType)
+	columns = appendOptionalStringColumn(columns, "NAME", req.Name)
+	columns = appendOptionalStringColumn(columns, "TRADE_NAME", req.TradeName)
+	columns = appendOptionalStringColumn(columns, "TAX_ID", req.TaxID)
+	columns = appendOptionalStringColumn(columns, "STATE_REG", req.StateReg)
+	columns = appendOptionalStringColumn(columns, "MUNICIPAL_REG", req.MunicipalReg)
+	columns = appendOptionalStringColumn(columns, "EMAIL", req.Email)
+	columns = appendOptionalStringColumn(columns, "PHONE", req.Phone)
+	columns = appendOptionalStringColumn(columns, "MOBILE", req.Mobile)
+	columns = appendAddressColumns(columns, req.Address)
 
 	if len(columns) == 0 {
 		return r.GetByID(ctx, tenantID, id)

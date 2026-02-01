@@ -31,8 +31,8 @@ func NewServiceRepository(db *sql.DB) *ServiceRepository {
 	}
 }
 
-// Create creates a new service using dynamic CRUD
-func (r *ServiceRepository) Create(ctx context.Context, tenantID string, req *models.CreateServiceRequest, createdBy string) (*models.Service, error) {
+// buildCreateServiceColumns builds the column values for creating a service
+func buildCreateServiceColumns(req *models.CreateServiceRequest) []ColumnValue {
 	currency := req.Currency
 	if currency == "" {
 		currency = "BRL"
@@ -51,6 +51,7 @@ func (r *ServiceRepository) Create(ctx context.Context, tenantID string, req *mo
 		{Name: "ACTIVE", Value: 1, Type: "NUMBER"},
 	}
 
+	// Optional string fields
 	if req.Description != "" {
 		columns = append(columns, ColumnValue{Name: "DESCRIPTION", Value: req.Description})
 	}
@@ -63,25 +64,36 @@ func (r *ServiceRepository) Create(ctx context.Context, tenantID string, req *mo
 	if req.ServiceCodeFiscal != "" {
 		columns = append(columns, ColumnValue{Name: "SERVICE_CODE_FISCAL", Value: req.ServiceCodeFiscal})
 	}
-	// Rate fields: nil=not provided, 0=explicit 0% rate (e.g., tax-exempt)
-	if req.ISSRate != nil {
-		columns = append(columns, ColumnValue{Name: "ISS_RATE", Value: *req.ISSRate, Type: "NUMBER"})
-	}
-	if req.IRRFRate != nil {
-		columns = append(columns, ColumnValue{Name: "IRRF_RATE", Value: *req.IRRFRate, Type: "NUMBER"})
-	}
-	if req.PISRate != nil {
-		columns = append(columns, ColumnValue{Name: "PIS_RATE", Value: *req.PISRate, Type: "NUMBER"})
-	}
-	if req.COFINSRate != nil {
-		columns = append(columns, ColumnValue{Name: "COFINS_RATE", Value: *req.COFINSRate, Type: "NUMBER"})
-	}
-	if req.CSLLRate != nil {
-		columns = append(columns, ColumnValue{Name: "CSLL_RATE", Value: *req.CSLLRate, Type: "NUMBER"})
-	}
+	columns = appendRateColumn(columns, "ISS_RATE", req.ISSRate)
+	columns = appendRateColumn(columns, "IRRF_RATE", req.IRRFRate)
+	columns = appendRateColumn(columns, "PIS_RATE", req.PISRate)
+	columns = appendRateColumn(columns, "COFINS_RATE", req.COFINSRate)
+	columns = appendRateColumn(columns, "CSLL_RATE", req.CSLLRate)
 	if req.Notes != "" {
 		columns = append(columns, ColumnValue{Name: "NOTES", Value: req.Notes})
 	}
+
+	// Rate fields: nil=not provided, 0=explicit 0% rate (e.g., tax-exempt)
+	columns = appendRateColumn(columns, "ISS_RATE", req.ISSRate)
+	columns = appendRateColumn(columns, "IRRF_RATE", req.IRRFRate)
+	columns = appendRateColumn(columns, "PIS_RATE", req.PISRate)
+	columns = appendRateColumn(columns, "COFINS_RATE", req.COFINSRate)
+	columns = appendRateColumn(columns, "CSLL_RATE", req.CSLLRate)
+
+	return columns
+}
+
+// appendRateColumn appends a rate column if the value is not nil
+func appendRateColumn(columns []ColumnValue, name string, rate *float64) []ColumnValue {
+	if rate != nil {
+		columns = append(columns, ColumnValue{Name: name, Value: *rate, Type: "NUMBER"})
+	}
+	return columns
+}
+
+// Create creates a new service using dynamic CRUD
+func (r *ServiceRepository) Create(ctx context.Context, tenantID string, req *models.CreateServiceRequest, createdBy string) (*models.Service, error) {
+	columns := buildCreateServiceColumns(req)
 
 	result, err := r.generic.Insert(ctx, TableServices, tenantID, columns, createdBy)
 	if err != nil {

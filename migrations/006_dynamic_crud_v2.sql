@@ -415,7 +415,8 @@ CREATE OR REPLACE PACKAGE pkg_crud AS
         p_table_name   VARCHAR2,
         p_tenant_id    VARCHAR2,
         p_id           NUMBER,
-        p_soft_delete  BOOLEAN DEFAULT TRUE  -- Try soft delete first
+        p_soft_delete  BOOLEAN DEFAULT TRUE,  -- Try soft delete first
+        p_deleted_by   VARCHAR2 DEFAULT NULL
     ) RETURN t_crud_result;
     
     -- ========================================================================
@@ -1387,7 +1388,8 @@ CREATE OR REPLACE PACKAGE BODY pkg_crud AS
         p_table_name   VARCHAR2,
         p_tenant_id    VARCHAR2,
         p_id           NUMBER,
-        p_soft_delete  BOOLEAN DEFAULT TRUE
+        p_soft_delete  BOOLEAN DEFAULT TRUE,
+        p_deleted_by   VARCHAR2 DEFAULT NULL
     ) RETURN t_crud_result IS
         v_config     crud_allowed_tables%ROWTYPE;
         v_sql        VARCHAR2(4000);
@@ -1404,18 +1406,40 @@ CREATE OR REPLACE PACKAGE BODY pkg_crud AS
         -- Try soft delete first if requested
         IF p_soft_delete THEN
             IF column_exists(p_table_name, 'ACTIVE') THEN
+                DECLARE
+                    v_set_clause VARCHAR2(400) := 'ACTIVE = 0';
+                    v_set_clause_no_tenant VARCHAR2(400) := 'ACTIVE = 0';
+                BEGIN
+                    IF column_exists(p_table_name, 'UPDATED_AT') THEN
+                        v_set_clause := v_set_clause || ', UPDATED_AT = CURRENT_TIMESTAMP';
+                        v_set_clause_no_tenant := v_set_clause_no_tenant || ', UPDATED_AT = CURRENT_TIMESTAMP';
+                    END IF;
+                    IF column_exists(p_table_name, 'DELETED_BY') AND p_deleted_by IS NOT NULL THEN
+                        v_set_clause := v_set_clause || ', DELETED_BY = :3';
+                        v_set_clause_no_tenant := v_set_clause_no_tenant || ', DELETED_BY = :2';
+                    END IF;
+
                 IF v_config.require_tenant = 1 THEN
                     v_sql := 'UPDATE ' || v_safe_table || 
-                             ' SET ACTIVE = 0, UPDATED_AT = CURRENT_TIMESTAMP' ||
+                             ' SET ' || v_set_clause ||
                              ' WHERE ' || safe_identifier(v_config.tenant_column) || ' = :1' ||
                              ' AND ' || safe_identifier(v_config.id_column) || ' = :2';
-                    EXECUTE IMMEDIATE v_sql USING p_tenant_id, p_id;
+                    IF INSTR(v_set_clause, ':3') > 0 THEN
+                        EXECUTE IMMEDIATE v_sql USING p_tenant_id, p_id, p_deleted_by;
+                    ELSE
+                        EXECUTE IMMEDIATE v_sql USING p_tenant_id, p_id;
+                    END IF;
                 ELSE
                     v_sql := 'UPDATE ' || v_safe_table || 
-                             ' SET ACTIVE = 0, UPDATED_AT = CURRENT_TIMESTAMP' ||
+                             ' SET ' || v_set_clause_no_tenant ||
                              ' WHERE ' || safe_identifier(v_config.id_column) || ' = :1';
-                    EXECUTE IMMEDIATE v_sql USING p_id;
+                    IF INSTR(v_set_clause_no_tenant, ':2') > 0 THEN
+                        EXECUTE IMMEDIATE v_sql USING p_id, p_deleted_by;
+                    ELSE
+                        EXECUTE IMMEDIATE v_sql USING p_id;
+                    END IF;
                 END IF;
+                END;
                 v_rows := SQL%ROWCOUNT;
                 
                 IF v_rows > 0 THEN
@@ -1425,9 +1449,15 @@ CREATE OR REPLACE PACKAGE BODY pkg_crud AS
                 -- Build SET clause for DELETED_AT and optionally UPDATED_AT
                 DECLARE
                     v_set_clause VARCHAR2(200) := 'DELETED_AT = CURRENT_TIMESTAMP';
+                    v_set_clause_no_tenant VARCHAR2(200) := 'DELETED_AT = CURRENT_TIMESTAMP';
                 BEGIN
                     IF column_exists(p_table_name, 'UPDATED_AT') THEN
                         v_set_clause := v_set_clause || ', UPDATED_AT = CURRENT_TIMESTAMP';
+                        v_set_clause_no_tenant := v_set_clause_no_tenant || ', UPDATED_AT = CURRENT_TIMESTAMP';
+                    END IF;
+                    IF column_exists(p_table_name, 'DELETED_BY') AND p_deleted_by IS NOT NULL THEN
+                        v_set_clause := v_set_clause || ', DELETED_BY = :3';
+                        v_set_clause_no_tenant := v_set_clause_no_tenant || ', DELETED_BY = :2';
                     END IF;
                     
                     IF v_config.require_tenant = 1 THEN
@@ -1435,12 +1465,20 @@ CREATE OR REPLACE PACKAGE BODY pkg_crud AS
                                  ' SET ' || v_set_clause ||
                                  ' WHERE ' || safe_identifier(v_config.tenant_column) || ' = :1' ||
                                  ' AND ' || safe_identifier(v_config.id_column) || ' = :2';
-                        EXECUTE IMMEDIATE v_sql USING p_tenant_id, p_id;
+                        IF INSTR(v_set_clause, ':3') > 0 THEN
+                            EXECUTE IMMEDIATE v_sql USING p_tenant_id, p_id, p_deleted_by;
+                        ELSE
+                            EXECUTE IMMEDIATE v_sql USING p_tenant_id, p_id;
+                        END IF;
                     ELSE
                         v_sql := 'UPDATE ' || v_safe_table || 
-                                 ' SET ' || v_set_clause ||
+                                 ' SET ' || v_set_clause_no_tenant ||
                                  ' WHERE ' || safe_identifier(v_config.id_column) || ' = :1';
-                        EXECUTE IMMEDIATE v_sql USING p_id;
+                        IF INSTR(v_set_clause_no_tenant, ':2') > 0 THEN
+                            EXECUTE IMMEDIATE v_sql USING p_id, p_deleted_by;
+                        ELSE
+                            EXECUTE IMMEDIATE v_sql USING p_id;
+                        END IF;
                     END IF;
                 END;
                 v_rows := SQL%ROWCOUNT;
@@ -1737,13 +1775,14 @@ CREATE OR REPLACE PROCEDURE sp_generic_delete(
     p_tenant_id    IN  VARCHAR2,
     p_id           IN  NUMBER,
     p_soft_delete  IN  NUMBER DEFAULT 1,
+    p_deleted_by   IN  VARCHAR2 DEFAULT NULL,
     p_rows         OUT NUMBER,
     p_success      OUT NUMBER,
     p_error_msg    OUT VARCHAR2
 ) AS
     v_result t_crud_result;
 BEGIN
-    v_result := pkg_crud.do_delete(p_table_name, p_tenant_id, p_id, p_soft_delete = 1);
+    v_result := pkg_crud.do_delete(p_table_name, p_tenant_id, p_id, p_soft_delete = 1, p_deleted_by);
     p_rows := v_result.rows_affected;
     p_success := v_result.success;
     p_error_msg := v_result.error_message;

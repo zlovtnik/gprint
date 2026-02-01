@@ -40,6 +40,11 @@ var allowedTables = map[string]bool{
 	"GENERATED_CONTRACTS": true,
 }
 
+const (
+	storedProcFailedMsg = "stored procedure failed"
+	queryErrFmt         = "query %s: %w"
+)
+
 // validateTableName checks if a table name is in the allowed list.
 func validateTableName(name string) error {
 	if !allowedTables[strings.ToUpper(name)] {
@@ -55,9 +60,7 @@ type ColumnValue struct {
 	Type  string // STRING, NUMBER, DATE, TIMESTAMP, NULL
 }
 
-// FilterCondition represents a WHERE clause filter.
-// TODO: Implement filtering support in GenericRepository methods (List, Query, etc.)
-// Planned for future enhancement to support dynamic WHERE clauses in CRUD operations.
+// FilterCondition represents a WHERE clause filter used by `Query` and `Count`.
 type FilterCondition struct {
 	Column   string
 	Operator string // =, <>, <, >, <=, >=, LIKE, IN, IS NULL, IS NOT NULL
@@ -65,9 +68,7 @@ type FilterCondition struct {
 	Type     string
 }
 
-// SortSpec represents an ORDER BY specification.
-// TODO: Implement sorting support in GenericRepository methods (List, Query, etc.)
-// Planned for future enhancement to support dynamic ORDER BY clauses in CRUD operations.
+// SortSpec represents an ORDER BY specification used by `Query`.
 type SortSpec struct {
 	Column    string
 	Direction string // ASC or DESC
@@ -124,6 +125,96 @@ func buildColumnValuesSQL(cols []ColumnValue) (string, error) {
 	}
 
 	return "t_column_values(" + strings.Join(parts, ", ") + ")", nil
+}
+
+// buildColumnsCSV validates and joins column names for pkg_crud.do_query.
+func buildColumnsCSV(cols []string) (string, error) {
+	if len(cols) == 0 {
+		return "", nil
+	}
+
+	parts := make([]string, 0, len(cols))
+	for _, col := range cols {
+		if err := validateIdentifier(col); err != nil {
+			return "", fmt.Errorf("invalid column name: %w", err)
+		}
+		parts = append(parts, col)
+	}
+
+	return strings.Join(parts, ","), nil
+}
+
+// buildFilterConditionsSQL creates the t_filter_conditions constructor SQL.
+// Returns "NULL" when no filters are provided.
+func buildFilterConditionsSQL(filters []FilterCondition) (string, error) {
+	if len(filters) == 0 {
+		return "NULL", nil
+	}
+
+	parts := make([]string, 0, len(filters))
+	for _, f := range filters {
+		if err := validateIdentifier(f.Column); err != nil {
+			return "", fmt.Errorf("invalid filter column: %w", err)
+		}
+
+		op := strings.ToUpper(strings.TrimSpace(f.Operator))
+		switch op {
+		case "=", "<>", "<", ">", "<=", ">=", "LIKE", "IN", "IS NULL", "IS NOT NULL":
+			// allowed
+		default:
+			return "", fmt.Errorf("invalid filter operator: %q", f.Operator)
+		}
+
+		valueType := f.Type
+		if valueType == "" {
+			valueType = inferType(f.Value)
+		}
+
+		valueExpr := "NULL"
+		if op != "IS NULL" && op != "IS NOT NULL" {
+			valueExpr = formatValue(f.Value)
+		}
+
+		parts = append(parts, fmt.Sprintf(
+			"t_filter_condition('%s', '%s', %s, '%s')",
+			escapeSQLString(f.Column),
+			op,
+			valueExpr,
+			escapeSQLString(valueType),
+		))
+	}
+
+	return "t_filter_conditions(" + strings.Join(parts, ", ") + ")", nil
+}
+
+// buildSortSpecsSQL creates the t_sort_specs constructor SQL.
+// Returns "NULL" when no sorts are provided.
+func buildSortSpecsSQL(sorts []SortSpec) (string, error) {
+	if len(sorts) == 0 {
+		return "NULL", nil
+	}
+
+	parts := make([]string, 0, len(sorts))
+	for _, s := range sorts {
+		if err := validateIdentifier(s.Column); err != nil {
+			return "", fmt.Errorf("invalid sort column: %w", err)
+		}
+		dir := strings.ToUpper(strings.TrimSpace(s.Direction))
+		if dir == "" {
+			dir = "ASC"
+		}
+		if dir != "ASC" && dir != "DESC" {
+			return "", fmt.Errorf("invalid sort direction: %q", s.Direction)
+		}
+
+		parts = append(parts, fmt.Sprintf(
+			"t_sort_spec('%s', '%s')",
+			escapeSQLString(s.Column),
+			dir,
+		))
+	}
+
+	return "t_sort_specs(" + strings.Join(parts, ", ") + ")", nil
 }
 
 // formatValue converts a Go value to SQL literal.
@@ -223,7 +314,7 @@ func (r *GenericRepository) Insert(
 
 	// Check stored procedure success status
 	if success != 1 {
-		errorStr := "stored procedure failed"
+		errorStr := storedProcFailedMsg
 		if errorMsg.Valid && errorMsg.String != "" {
 			errorStr = errorMsg.String
 		}
@@ -300,7 +391,7 @@ func (r *GenericRepository) Update(
 
 	// Check stored procedure success status
 	if success != 1 {
-		errorStr := "stored procedure failed"
+		errorStr := storedProcFailedMsg
 		if errorMsg.Valid && errorMsg.String != "" {
 			errorStr = errorMsg.String
 		}
@@ -323,16 +414,14 @@ func (r *GenericRepository) Update(
 }
 
 // Delete performs a generic DELETE operation (soft delete by default).
-// Note: deletedBy is currently not passed to sp_generic_delete as the stored procedure
-// doesn't support it yet. For soft deletes, UPDATED_BY is set via UPDATED_AT trigger or
-// you can call Update separately to set DELETED_BY if needed.
+// If the table supports DELETED_BY, the value is passed to sp_generic_delete.
 func (r *GenericRepository) Delete(
 	ctx context.Context,
 	tableName string,
 	tenantID string,
 	id int64,
 	softDelete bool,
-	deletedBy string, // Currently unused - reserved for future sp_generic_delete enhancement
+	deletedBy string,
 ) (*CRUDResult, error) {
 	// Validate table name against allowlist to prevent SQL injection
 	if err := validateTableName(tableName); err != nil {
@@ -344,19 +433,16 @@ func (r *GenericRepository) Delete(
 		soft = 0
 	}
 
-	// TODO: Update sp_generic_delete to accept deletedBy parameter and set DELETED_BY column
-	_ = deletedBy // Silence unused variable warning until sp is updated
-
 	query := `
 		DECLARE
 			v_rows NUMBER;
 			v_success NUMBER;
 			v_error VARCHAR2(4000);
 		BEGIN
-			sp_generic_delete(:1, :2, :3, :4, v_rows, v_success, v_error);
-			:5 := v_rows;
-			:6 := v_success;
-			:7 := v_error;
+			sp_generic_delete(:1, :2, :3, :4, :5, v_rows, v_success, v_error);
+			:6 := v_rows;
+			:7 := v_success;
+			:8 := v_error;
 		END;
 	`
 
@@ -369,6 +455,7 @@ func (r *GenericRepository) Delete(
 		tenantID,
 		id,
 		soft,
+		sql.NullString{String: deletedBy, Valid: deletedBy != ""},
 		sql.Out{Dest: &rows},
 		sql.Out{Dest: &success},
 		sql.Out{Dest: &errorMsg},
@@ -379,7 +466,7 @@ func (r *GenericRepository) Delete(
 
 	// Check stored procedure success status
 	if success != 1 {
-		errorStr := "stored procedure failed"
+		errorStr := storedProcFailedMsg
 		if errorMsg.Valid && errorMsg.String != "" {
 			errorStr = errorMsg.String
 		}
@@ -443,4 +530,100 @@ func (r *GenericRepository) UpdateAggregate(
 	}
 
 	return result, nil
+}
+
+// QueryOptions defines optional parameters for Query.
+type QueryOptions struct {
+	Columns []string
+	Filters []FilterCondition
+	Sort    []SortSpec
+	Offset  int
+	Limit   int
+}
+
+// Query retrieves rows from a table using pkg_crud.do_query with optional filters and sorting.
+// Note: The caller is responsible for closing the returned rows.
+func (r *GenericRepository) Query(
+	ctx context.Context,
+	tableName string,
+	tenantID string,
+	opts QueryOptions,
+) (*sql.Rows, error) {
+	if err := validateTableName(tableName); err != nil {
+		return nil, fmt.Errorf("query: %w", err)
+	}
+	if opts.Offset < 0 || opts.Limit < 0 {
+		return nil, fmt.Errorf("invalid query options: negative offset/limit")
+	}
+
+	colsCSV, err := buildColumnsCSV(opts.Columns)
+	if err != nil {
+		return nil, fmt.Errorf(queryErrFmt, tableName, err)
+	}
+
+	filtersSQL, err := buildFilterConditionsSQL(opts.Filters)
+	if err != nil {
+		return nil, fmt.Errorf(queryErrFmt, tableName, err)
+	}
+
+	sortSQL, err := buildSortSpecsSQL(opts.Sort)
+	if err != nil {
+		return nil, fmt.Errorf(queryErrFmt, tableName, err)
+	}
+
+	query := fmt.Sprintf(`
+		BEGIN
+			:1 := pkg_crud.do_query(:2, :3, :4, %s, %s, :5, :6);
+		END;
+	`, filtersSQL, sortSQL)
+
+	var cursor *sql.Rows
+	_, err = r.db.ExecContext(ctx, query,
+		sql.Out{Dest: &cursor},
+		tableName,
+		tenantID,
+		sql.NullString{String: colsCSV, Valid: colsCSV != ""},
+		opts.Offset,
+		opts.Limit,
+	)
+	if err != nil {
+		return nil, fmt.Errorf(queryErrFmt, tableName, err)
+	}
+
+	return cursor, nil
+}
+
+// Count returns the number of rows matching the provided filters using pkg_crud.do_count.
+func (r *GenericRepository) Count(
+	ctx context.Context,
+	tableName string,
+	tenantID string,
+	filters []FilterCondition,
+) (int64, error) {
+	if err := validateTableName(tableName); err != nil {
+		return 0, fmt.Errorf("count: %w", err)
+	}
+
+	filtersSQL, err := buildFilterConditionsSQL(filters)
+	if err != nil {
+		return 0, fmt.Errorf("count %s: %w", tableName, err)
+	}
+
+	query := fmt.Sprintf(`
+		BEGIN
+			:1 := pkg_crud.do_count(:2, :3, %s);
+		END;
+	`, filtersSQL)
+
+	var count int64
+	_, err = r.db.ExecContext(ctx, query,
+		sql.Out{Dest: &count},
+		tableName,
+		tenantID,
+	)
+	if err != nil {
+		return 0, fmt.Errorf("count %s: %w", tableName, err)
+	}
+
+	return count, nil
 }

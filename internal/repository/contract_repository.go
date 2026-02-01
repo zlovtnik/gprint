@@ -23,6 +23,15 @@ const (
 	TableContractItems = "CONTRACT_ITEMS"
 )
 
+const (
+	dateLayoutYMD       = "2006-01-02"
+	errUpdateTotalValue = "failed to update total: %s"
+)
+
+type contextKey string
+
+const traceIDKey contextKey = "trace_id"
+
 // ContractRepository handles contract data access
 type ContractRepository struct {
 	db      *sql.DB
@@ -46,7 +55,7 @@ func decimalToFloat64(ctx context.Context, fieldName string, d decimal.Decimal) 
 	if !exact {
 		// Extract trace ID from context if available (assuming it's stored as a string value)
 		traceID := "unknown"
-		if traceVal := ctx.Value("trace_id"); traceVal != nil {
+		if traceVal := ctx.Value(traceIDKey); traceVal != nil {
 			if tid, ok := traceVal.(string); ok {
 				traceID = tid
 			}
@@ -75,7 +84,7 @@ func (r *ContractRepository) Create(ctx context.Context, tenantID string, req *m
 		{Name: "CONTRACT_NUMBER", Value: req.ContractNumber},
 		{Name: "CONTRACT_TYPE", Value: string(req.ContractType)},
 		{Name: "CUSTOMER_ID", Value: req.CustomerID, Type: "NUMBER"},
-		{Name: "START_DATE", Value: req.StartDate.Format("2006-01-02"), Type: "DATE"},
+		{Name: "START_DATE", Value: req.StartDate.Format(dateLayoutYMD), Type: "DATE"},
 		{Name: "DURATION_MONTHS", Value: req.DurationMonths, Type: "NUMBER"},
 		{Name: "AUTO_RENEW", Value: boolToInt(req.AutoRenew), Type: "NUMBER"},
 		{Name: "BILLING_CYCLE", Value: billingCycleStr},
@@ -84,7 +93,7 @@ func (r *ContractRepository) Create(ctx context.Context, tenantID string, req *m
 	}
 
 	if req.EndDate != nil {
-		columns = append(columns, ColumnValue{Name: "END_DATE", Value: req.EndDate.Format("2006-01-02"), Type: "DATE"})
+		columns = append(columns, ColumnValue{Name: "END_DATE", Value: req.EndDate.Format(dateLayoutYMD), Type: "DATE"})
 	}
 	if req.PaymentTerms != "" {
 		columns = append(columns, ColumnValue{Name: "PAYMENT_TERMS", Value: req.PaymentTerms})
@@ -123,7 +132,7 @@ func (r *ContractRepository) Create(ctx context.Context, tenantID string, req *m
 		return nil, fmt.Errorf(errFmtUpdateTotalVal, err)
 	}
 	if !aggResult.Success {
-		return nil, fmt.Errorf("failed to update total: %s", aggResult.ErrorMessage)
+		return nil, fmt.Errorf(errUpdateTotalValue, aggResult.ErrorMessage)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -145,13 +154,13 @@ func (r *ContractRepository) insertContractItem(ctx context.Context, tenantID st
 	}
 
 	if item.StartDate != nil {
-		columns = append(columns, ColumnValue{Name: "START_DATE", Value: item.StartDate.Format("2006-01-02"), Type: "DATE"})
+		columns = append(columns, ColumnValue{Name: "START_DATE", Value: item.StartDate.Format(dateLayoutYMD), Type: "DATE"})
 	}
 	if item.EndDate != nil {
-		columns = append(columns, ColumnValue{Name: "END_DATE", Value: item.EndDate.Format("2006-01-02"), Type: "DATE"})
+		columns = append(columns, ColumnValue{Name: "END_DATE", Value: item.EndDate.Format(dateLayoutYMD), Type: "DATE"})
 	}
 	if item.DeliveryDate != nil {
-		columns = append(columns, ColumnValue{Name: "DELIVERY_DATE", Value: item.DeliveryDate.Format("2006-01-02"), Type: "DATE"})
+		columns = append(columns, ColumnValue{Name: "DELIVERY_DATE", Value: item.DeliveryDate.Format(dateLayoutYMD), Type: "DATE"})
 	}
 	if item.Description != "" {
 		columns = append(columns, ColumnValue{Name: "DESCRIPTION", Value: item.Description})
@@ -486,10 +495,10 @@ func (r *ContractRepository) Update(ctx context.Context, tenantID string, id int
 		columns = append(columns, ColumnValue{Name: "CONTRACT_TYPE", Value: string(*req.ContractType)})
 	}
 	if req.StartDate != nil {
-		columns = append(columns, ColumnValue{Name: "START_DATE", Value: req.StartDate.Format("2006-01-02"), Type: "DATE"})
+		columns = append(columns, ColumnValue{Name: "START_DATE", Value: req.StartDate.Format(dateLayoutYMD), Type: "DATE"})
 	}
 	if req.EndDate != nil {
-		columns = append(columns, ColumnValue{Name: "END_DATE", Value: req.EndDate.Format("2006-01-02"), Type: "DATE"})
+		columns = append(columns, ColumnValue{Name: "END_DATE", Value: req.EndDate.Format(dateLayoutYMD), Type: "DATE"})
 	}
 	if req.DurationMonths != nil {
 		columns = append(columns, ColumnValue{Name: "DURATION_MONTHS", Value: *req.DurationMonths, Type: "NUMBER"})
@@ -590,13 +599,13 @@ func (r *ContractRepository) AddItem(ctx context.Context, tenantID string, contr
 	}
 
 	if req.StartDate != nil {
-		columns = append(columns, ColumnValue{Name: "START_DATE", Value: req.StartDate.Format("2006-01-02"), Type: "DATE"})
+		columns = append(columns, ColumnValue{Name: "START_DATE", Value: req.StartDate.Format(dateLayoutYMD), Type: "DATE"})
 	}
 	if req.EndDate != nil {
-		columns = append(columns, ColumnValue{Name: "END_DATE", Value: req.EndDate.Format("2006-01-02"), Type: "DATE"})
+		columns = append(columns, ColumnValue{Name: "END_DATE", Value: req.EndDate.Format(dateLayoutYMD), Type: "DATE"})
 	}
 	if req.DeliveryDate != nil {
-		columns = append(columns, ColumnValue{Name: "DELIVERY_DATE", Value: req.DeliveryDate.Format("2006-01-02"), Type: "DATE"})
+		columns = append(columns, ColumnValue{Name: "DELIVERY_DATE", Value: req.DeliveryDate.Format(dateLayoutYMD), Type: "DATE"})
 	}
 	if req.Description != "" {
 		columns = append(columns, ColumnValue{Name: "DESCRIPTION", Value: req.Description})
@@ -624,7 +633,7 @@ func (r *ContractRepository) AddItem(ctx context.Context, tenantID string, contr
 		return nil, fmt.Errorf(errFmtUpdateTotalVal, err)
 	}
 	if !aggResult.Success {
-		return nil, fmt.Errorf("failed to update total: %s", aggResult.ErrorMessage)
+		return nil, fmt.Errorf(errUpdateTotalValue, aggResult.ErrorMessage)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -688,7 +697,7 @@ func (r *ContractRepository) DeleteItem(ctx context.Context, tenantID string, co
 		return fmt.Errorf(errFmtUpdateTotalVal, err)
 	}
 	if !aggResult.Success {
-		return fmt.Errorf("failed to update total: %s", aggResult.ErrorMessage)
+		return fmt.Errorf(errUpdateTotalValue, aggResult.ErrorMessage)
 	}
 
 	if err := tx.Commit(); err != nil {
