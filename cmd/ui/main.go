@@ -432,6 +432,12 @@ func (m Model) handleRightKey(inFormMode bool) (tea.Model, tea.Cmd) {
 }
 
 func main() {
+	// Check for SSH server mode
+	if len(os.Args) > 1 && os.Args[1] == "serve" {
+		sshMain()
+		return
+	}
+
 	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error running program: %v\n", err)

@@ -1,11 +1,54 @@
-version: '3.8'
-
 services:
+  # ── Kong API Gateway (DB-less / declarative) ─────────────────────────────
+  kong:
+    image: kong:3.9
+    container_name: kong
+    environment:
+      # DB-less mode
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /etc/kong/kong.yml
+      # Listeners
+      KONG_PROXY_LISTEN: "0.0.0.0:8000, 0.0.0.0:8443 ssl"
+      # Admin endpoints bind to localhost only — not reachable from outside the container.
+      # Use 'docker exec kong curl http://127.0.0.1:8001/status' for admin access.
+      KONG_ADMIN_LISTEN: "127.0.0.1:8001"
+      KONG_ADMIN_GUI_LISTEN: "127.0.0.1:8002"
+      # Redis for shared rate-limit counters (works across scaled Kong nodes)
+      KONG_REDIS_HOST: ${KONG_REDIS_HOST:-redis}
+      KONG_REDIS_PORT: ${KONG_REDIS_PORT:-6379}
+      # Logging
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      # Misc
+      KONG_LOG_LEVEL: info
+    ports:
+      - "8000:8000"   # Proxy (public traffic)
+      - "8443:8443"   # Proxy SSL
+      # Admin ports are NOT published — access via: docker exec kong curl http://127.0.0.1:8001/status
+    volumes:
+      - ./kong:/etc/kong
+    depends_on:
+      gprint:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  # ── gprint API backend ───────────────────────────────────────────────────
   gprint:
     build: .
     container_name: gprint
-    ports:
-      - "8080:8080"
+    # Port 8080 is only exposed to the Docker network (Kong proxies traffic)
+    expose:
+      - "8080"
     environment:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=8080
@@ -29,12 +72,32 @@ services:
       retries: 3
       start_period: 10s
 
+  # ── Redis (shared rate-limit counters for Kong) ──────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    expose:
+      - "6379"
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ── Oracle Database ──────────────────────────────────────────────────────
   oracle:
     image: container-registry.oracle.com/database/express:21.3.0-xe
     container_name: oracle-db
-    ports:
-      - "1521:1521"
-      - "5500:5500"
+    # DB ports are internal-only; gprint connects via Docker network.
+    # For local dev access, use: docker compose --profile dev up
+    expose:
+      - "1521"
+      - "5500"
     environment:
       - ORACLE_PWD=${ORACLE_PASSWORD:?ORACLE_PASSWORD must be set}
       - ORACLE_CHARACTERSET=AL32UTF8
@@ -48,6 +111,17 @@ services:
       timeout: 10s
       retries: 5
       start_period: 120s
+
+  # ── Dev-only: Oracle ports published to host ─────────────────────────────
+  oracle-dev:
+    extends:
+      service: oracle
+    container_name: oracle-db-dev
+    profiles:
+      - dev
+    ports:
+      - "1521:1521"
+      - "5500:5500"
 
 volumes:
   oracle-data:

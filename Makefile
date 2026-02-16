@@ -61,6 +61,15 @@ run:
 ui:
 	$(GORUN) $(UI_PATH)
 
+# Run the UI SSH server
+ui-ssh:
+	@if [ -f .env ]; then \
+		export $$(grep -v '^#' .env | xargs) && \
+		$(GORUN) $(UI_PATH) serve; \
+	else \
+		$(GORUN) $(UI_PATH) serve; \
+	fi
+
 # Run with hot reload (requires air: go install github.com/cosmtrek/air@latest)
 dev:
 	@if [ -f .env ]; then \

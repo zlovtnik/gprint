@@ -380,6 +380,49 @@ var (
 	DetailValueStyle = lipgloss.NewStyle().
 				Foreground(textPrimary)
 
+	// Card-based detail view styles
+	CardStyle = lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(neonMagenta).
+			Padding(1, 2).
+			MarginBottom(1)
+
+	CardHeaderStyle = lipgloss.NewStyle().
+			Foreground(neonCyan).
+			Bold(true).
+			BorderBottom(true).
+			BorderStyle(lipgloss.NormalBorder()).
+			BorderForeground(borderSubtle).
+			MarginBottom(1).
+			PaddingBottom(1)
+
+	CardSectionStyle = lipgloss.NewStyle().
+				Foreground(neonMagenta).
+				Bold(true).
+				MarginTop(1).
+				MarginBottom(1)
+
+	CardFieldLabelStyle = lipgloss.NewStyle().
+				Foreground(textMuted).
+				Width(16)
+
+	CardFieldValueStyle = lipgloss.NewStyle().
+				Foreground(textBright)
+
+	CardFieldRowStyle = lipgloss.NewStyle().
+				MarginBottom(0)
+
+	CardDividerStyle = lipgloss.NewStyle().
+				Foreground(borderSubtle)
+
+	// Grid layout for 2-column display
+	CardGridLeftStyle = lipgloss.NewStyle().
+				Width(24).
+				PaddingRight(2)
+
+	CardGridRightStyle = lipgloss.NewStyle().
+				Width(24)
+
 	// ═══════════════════════════════════════════════════════════════════════════
 	// BADGE STYLES - Neon Edition
 	// ═══════════════════════════════════════════════════════════════════════════
@@ -547,4 +590,98 @@ func FormatBreadcrumb(segments ...string) string {
 		}
 	}
 	return result.String()
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CARD RENDERING HELPERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+// CardField represents a field in a detail card
+type CardField struct {
+	Label string
+	Value string
+	Icon  string // optional icon prefix
+}
+
+// CardSection represents a section with multiple fields
+type CardSection struct {
+	Title  string
+	Icon   string
+	Fields []CardField
+}
+
+// RenderCardHeader renders a card header with icon and title
+func RenderCardHeader(icon, title string) string {
+	return CardHeaderStyle.Render(icon + " " + title)
+}
+
+// RenderCardField renders a single field row
+func RenderCardField(f CardField) string {
+	label := CardFieldLabelStyle.Render(f.Label)
+	value := CardFieldValueStyle.Render(f.Value)
+	if f.Icon != "" {
+		return f.Icon + " " + label + value
+	}
+	return "  " + label + value
+}
+
+// RenderCardSection renders a section with title and fields
+func RenderCardSection(s CardSection) string {
+	var b strings.Builder
+	if s.Title != "" {
+		title := s.Title
+		if s.Icon != "" {
+			title = s.Icon + " " + title
+		}
+		b.WriteString(CardSectionStyle.Render(title) + "\n")
+	}
+	for _, f := range s.Fields {
+		b.WriteString(RenderCardField(f) + "\n")
+	}
+	return b.String()
+}
+
+// RenderCardDivider renders a horizontal divider
+func RenderCardDivider(width int) string {
+	return CardDividerStyle.Render(strings.Repeat("─", width))
+}
+
+// RenderCard renders a complete card with sections
+func RenderCard(header string, sections []CardSection, width int) string {
+	var b strings.Builder
+	b.WriteString(header + "\n\n")
+	for i, s := range sections {
+		b.WriteString(RenderCardSection(s))
+		if i < len(sections)-1 {
+			b.WriteString(RenderCardDivider(width-6) + "\n")
+		}
+	}
+	return CardStyle.Width(width).Render(b.String())
+}
+
+// RenderTwoColumnCard renders fields in a 2-column layout
+func RenderTwoColumnCard(header string, leftFields, rightFields []CardField, width int) string {
+	var b strings.Builder
+	b.WriteString(header + "\n\n")
+
+	maxRows := len(leftFields)
+	if len(rightFields) > maxRows {
+		maxRows = len(rightFields)
+	}
+
+	for i := 0; i < maxRows; i++ {
+		left := ""
+		right := ""
+		if i < len(leftFields) {
+			left = RenderCardField(leftFields[i])
+		}
+		if i < len(rightFields) {
+			right = RenderCardField(rightFields[i])
+		}
+		leftCol := CardGridLeftStyle.Render(left)
+		rightCol := CardGridRightStyle.Render(right)
+		b.WriteString(leftCol + rightCol + "\n")
+	}
+
+	return CardStyle.Width(width).Render(b.String())
 }

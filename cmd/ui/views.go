@@ -219,33 +219,55 @@ func (m Model) renderCustomerDetail() string {
 	c := m.selectedCustomer
 
 	var b strings.Builder
-	b.WriteString(ui.SubtitleStyle.Render("Customer Details") + "\n\n")
 
-	details := []struct {
-		key   string
-		value string
+	// Card header
+	header := ui.RenderCardHeader("◆", c.Name)
+
+	// Build sections
+	sections := []ui.CardSection{
+		{
+			Title: "Identity",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "Code", Value: c.CustomerCode},
+				{Label: "Type", Value: c.CustomerType},
+				{Label: "Tax ID", Value: c.TaxID},
+				{Label: "Trade Name", Value: c.TradeName},
+			},
+		},
+		{
+			Title: "Contact",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "Email", Value: c.Email},
+				{Label: "Phone", Value: c.Phone},
+			},
+		},
+		{
+			Title: "Status",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "Active", Value: ui.FormatBool(c.Active)},
+				{Label: "Created", Value: c.CreatedAt.Format(fmtDateTimeDisplay)},
+				{Label: "ID", Value: fmt.Sprintf("%d", c.ID)},
+			},
+		},
+	}
+
+	cardWidth := 52
+	b.WriteString(ui.RenderCard(header, sections, cardWidth))
+	b.WriteString("\n")
+
+	// Actions with icons
+	b.WriteString(ui.CardSectionStyle.Render("⚡ Actions") + "\n")
+	actions := []struct {
+		icon string
+		text string
 	}{
-		{"ID", fmt.Sprintf("%d", c.ID)},
-		{"Code", c.CustomerCode},
-		{"Name", c.Name},
-		{"Type", c.CustomerType},
-		{"Trade Name", c.TradeName},
-		{"Tax ID", c.TaxID},
-		{"Email", c.Email},
-		{"Phone", c.Phone},
-		{"Active", ui.FormatBool(c.Active)},
-		{"Created", c.CreatedAt.Format(fmtDateTimeDisplay)},
+		{"✎", "Edit"},
+		{"✕", "Delete"},
+		{"←", "Back"},
 	}
-
-	for _, d := range details {
-		b.WriteString(fmt.Sprintf(fmtKeyValue,
-			ui.DetailKeyStyle.Render(d.key+":"),
-			ui.DetailValueStyle.Render(d.value)))
-	}
-
-	// Actions
-	b.WriteString("\n" + ui.SubtitleStyle.Render("Actions") + "\n")
-	actions := []string{"Edit", "Delete", "Back"}
 	for i, action := range actions {
 		cursor := "  "
 		style := ui.MenuItemStyle
@@ -253,7 +275,7 @@ func (m Model) renderCustomerDetail() string {
 			cursor = ui.CursorStyle.Render("▸ ")
 			style = ui.SelectedMenuItemStyle
 		}
-		b.WriteString(fmt.Sprintf(fmtCursorItem, cursor, style.Render(action)))
+		b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, action.icon, style.Render(action.text)))
 	}
 
 	return b.String()
@@ -315,31 +337,54 @@ func (m Model) renderServiceDetail() string {
 	s := m.selectedService
 
 	var b strings.Builder
-	b.WriteString(ui.SubtitleStyle.Render("Service Details") + "\n\n")
 
-	details := []struct {
-		key   string
-		value string
+	// Card header with service name
+	header := ui.RenderCardHeader("◆", s.Name)
+
+	// Build sections
+	sections := []ui.CardSection{
+		{
+			Title: "Service Info",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "Code", Value: s.ServiceCode},
+				{Label: "Category", Value: s.Category},
+				{Label: "Description", Value: truncate(s.Description, 35)},
+			},
+		},
+		{
+			Title: "Pricing",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "Unit Price", Value: s.Currency + " " + s.UnitPrice.StringFixed(2)},
+				{Label: "Price Unit", Value: s.PriceUnit},
+			},
+		},
+		{
+			Title: "Status",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "Active", Value: ui.FormatBool(s.Active)},
+				{Label: "Created", Value: s.CreatedAt.Format(fmtDateTimeDisplay)},
+				{Label: "ID", Value: fmt.Sprintf("%d", s.ID)},
+			},
+		},
+	}
+
+	cardWidth := 52
+	b.WriteString(ui.RenderCard(header, sections, cardWidth))
+	b.WriteString("\n")
+
+	// Actions with icons
+	b.WriteString(ui.CardSectionStyle.Render("⚡ Actions") + "\n")
+	actions := []struct {
+		icon string
+		text string
 	}{
-		{"ID", fmt.Sprintf("%d", s.ID)},
-		{"Code", s.ServiceCode},
-		{"Name", s.Name},
-		{"Description", s.Description},
-		{"Category", s.Category},
-		{"Price", fmt.Sprintf("%s %s / %s", s.Currency, s.UnitPrice.StringFixed(2), s.PriceUnit)},
-		{"Active", ui.FormatBool(s.Active)},
-		{"Created", s.CreatedAt.Format(fmtDateTimeDisplay)},
+		{"✎", "Edit"},
+		{"✕", "Delete"},
+		{"←", "Back"},
 	}
-
-	for _, d := range details {
-		b.WriteString(fmt.Sprintf(fmtKeyValue,
-			ui.DetailKeyStyle.Render(d.key+":"),
-			ui.DetailValueStyle.Render(d.value)))
-	}
-
-	// Actions
-	b.WriteString("\n" + ui.SubtitleStyle.Render("Actions") + "\n")
-	actions := []string{"Edit", "Delete", "Back"}
 	for i, action := range actions {
 		cursor := "  "
 		style := ui.MenuItemStyle
@@ -347,7 +392,7 @@ func (m Model) renderServiceDetail() string {
 			cursor = ui.CursorStyle.Render("▸ ")
 			style = ui.SelectedMenuItemStyle
 		}
-		b.WriteString(fmt.Sprintf(fmtCursorItem, cursor, style.Render(action)))
+		b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, action.icon, style.Render(action.text)))
 	}
 
 	return b.String()
@@ -407,38 +452,61 @@ func (m Model) renderContractDetail() string {
 	c := m.selectedContract
 
 	var b strings.Builder
-	b.WriteString(ui.SubtitleStyle.Render("Contract Details") + "\n\n")
+
+	// Card header with contract number and status badge
+	header := ui.RenderCardHeader("◆", c.ContractNumber+" "+ui.FormatStatus(c.Status))
 
 	endDate := "N/A"
 	if c.EndDate != nil {
 		endDate = c.EndDate.Format("2006-01-02")
 	}
 
-	details := []struct {
-		key   string
-		value string
+	// Build sections
+	sections := []ui.CardSection{
+		{
+			Title: "Contract Info",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "Type", Value: c.ContractType},
+				{Label: "Customer ID", Value: fmt.Sprintf("%d", c.CustomerID)},
+				{Label: "Billing Cycle", Value: c.BillingCycle},
+			},
+		},
+		{
+			Title: "Timeline",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "Start Date", Value: c.StartDate.Format("2006-01-02")},
+				{Label: "End Date", Value: endDate},
+				{Label: "Created", Value: c.CreatedAt.Format(fmtDateTimeDisplay)},
+			},
+		},
+		{
+			Title: "Financial",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "Total Value", Value: c.TotalValue.String()},
+				{Label: "ID", Value: fmt.Sprintf("%d", c.ID)},
+			},
+		},
+	}
+
+	cardWidth := 52
+	b.WriteString(ui.RenderCard(header, sections, cardWidth))
+	b.WriteString("\n")
+
+	// Actions with icons
+	b.WriteString(ui.CardSectionStyle.Render("⚡ Actions") + "\n")
+	actions := []struct {
+		icon string
+		text string
 	}{
-		{"ID", fmt.Sprintf("%d", c.ID)},
-		{"Number", c.ContractNumber},
-		{"Type", c.ContractType},
-		{"Customer ID", fmt.Sprintf("%d", c.CustomerID)},
-		{"Start Date", c.StartDate.Format("2006-01-02")},
-		{"End Date", endDate},
-		{"Total Value", c.TotalValue.String()},
-		{"Billing Cycle", c.BillingCycle},
-		{"Status", ui.FormatStatus(c.Status)},
-		{"Created", c.CreatedAt.Format(fmtDateTimeDisplay)},
+		{"✎", "Edit"},
+		{"⚙", "Generate"},
+		{"⎙", "Print"},
+		{"✓", "Sign"},
+		{"←", "Back"},
 	}
-
-	for _, d := range details {
-		b.WriteString(fmt.Sprintf(fmtKeyValue,
-			ui.DetailKeyStyle.Render(d.key+":"),
-			ui.DetailValueStyle.Render(d.value)))
-	}
-
-	// Actions
-	b.WriteString("\n" + ui.SubtitleStyle.Render("Actions") + "\n")
-	actions := []string{"Edit", "Generate", "Print", "Sign", "Back"}
 	for i, action := range actions {
 		cursor := "  "
 		style := ui.MenuItemStyle
@@ -446,7 +514,7 @@ func (m Model) renderContractDetail() string {
 			cursor = ui.CursorStyle.Render("▸ ")
 			style = ui.SelectedMenuItemStyle
 		}
-		b.WriteString(fmt.Sprintf(fmtCursorItem, cursor, style.Render(action)))
+		b.WriteString(fmt.Sprintf("%s%s %s\n", cursor, action.icon, style.Render(action.text)))
 	}
 
 	return b.String()
@@ -517,57 +585,102 @@ func (m Model) renderPrintJobDetail() string {
 	j := m.selectedPrintJob
 
 	var b strings.Builder
-	b.WriteString(ui.SubtitleStyle.Render("Print Job Details") + "\n\n")
 
-	completedAt := "N/A"
+	// Card header with job ID and status
+	header := ui.RenderCardHeader("◆", fmt.Sprintf("Print Job #%d %s", j.ID, ui.FormatStatus(j.Status)))
+
+	completedAt := "In Progress"
 	if j.CompletedAt != nil {
 		completedAt = j.CompletedAt.Format(fmtDateTimeDisplay)
 	}
 
-	details := []struct {
-		key   string
-		value string
-	}{
-		{"ID", fmt.Sprintf("%d", j.ID)},
-		{"Contract ID", fmt.Sprintf("%d", j.ContractID)},
-		{"Format", j.Format},
-		{"Status", ui.FormatStatus(j.Status)},
-		{"File Size", fmt.Sprintf("%d bytes", j.FileSize)},
-		{"Page Count", fmt.Sprintf("%d", j.PageCount)},
-		{"Queued At", j.QueuedAt.Format(fmtDateTimeDisplay)},
-		{"Completed At", completedAt},
-		{"Requested By", j.RequestedBy},
+	// Build sections
+	sections := []ui.CardSection{
+		{
+			Title: "Job Info",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "Contract ID", Value: fmt.Sprintf("%d", j.ContractID)},
+				{Label: "Format", Value: j.Format},
+				{Label: "Requested By", Value: j.RequestedBy},
+			},
+		},
+		{
+			Title: "Output",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "File Size", Value: formatFileSize(j.FileSize)},
+				{Label: "Page Count", Value: fmt.Sprintf("%d pages", j.PageCount)},
+			},
+		},
+		{
+			Title: "Timeline",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "Queued At", Value: j.QueuedAt.Format(fmtDateTimeDisplay)},
+				{Label: "Completed At", Value: completedAt},
+			},
+		},
 	}
 
-	for _, d := range details {
-		b.WriteString(fmt.Sprintf(fmtKeyValue,
-			ui.DetailKeyStyle.Render(d.key+":"),
-			ui.DetailValueStyle.Render(d.value)))
-	}
+	cardWidth := 52
+	b.WriteString(ui.RenderCard(header, sections, cardWidth))
+	b.WriteString("\n")
 
-	b.WriteString("\n" + ui.InfoStyle.Render("Press Esc to go back"))
+	b.WriteString(ui.InfoStyle.Render("Press Esc to go back"))
 	return b.String()
+}
+
+// formatFileSize formats bytes into human-readable size
+func formatFileSize(bytes int64) string {
+	// Handle negative values
+	if bytes < 0 {
+		return "-" + formatFileSize(-bytes)
+	}
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
 }
 
 func (m Model) renderSettings() string {
 	var b strings.Builder
-	b.WriteString(ui.SubtitleStyle.Render("Settings") + "\n\n")
 
-	details := []struct {
-		key   string
-		value string
-	}{
-		{"API URL", m.baseURL},
-		{"Token", maskToken(m.token)},
+	// Card header
+	header := ui.RenderCardHeader("◆", "Settings")
+
+	// Build sections
+	sections := []ui.CardSection{
+		{
+			Title: "Connection",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "API URL", Value: m.baseURL},
+				{Label: "Token", Value: maskToken(m.token)},
+			},
+		},
+		{
+			Title: "Session",
+			Icon:  "◈",
+			Fields: []ui.CardField{
+				{Label: "User", Value: m.user},
+				{Label: "Tenant ID", Value: m.tenantID},
+				{Label: "Signer", Value: m.signer},
+			},
+		},
 	}
 
-	for _, d := range details {
-		b.WriteString(fmt.Sprintf(fmtKeyValue,
-			ui.DetailKeyStyle.Render(d.key+":"),
-			ui.DetailValueStyle.Render(d.value)))
-	}
+	cardWidth := 52
+	b.WriteString(ui.RenderCard(header, sections, cardWidth))
+	b.WriteString("\n")
 
-	b.WriteString("\n" + ui.InfoStyle.Render("Set GPRINT_API_URL and GPRINT_TOKEN environment variables"))
+	b.WriteString(ui.InfoStyle.Render("Set GPRINT_API_URL and GPRINT_TOKEN environment variables"))
 	return b.String()
 }
 

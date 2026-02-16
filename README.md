@@ -63,6 +63,7 @@ migrations/               # Database migrations
 - Go 1.22+
 - Oracle Database 19c+
 - Oracle Instant Client (for godror driver)
+- Redis 7+ (used by Kong for shared rate-limit counters — see architecture diagram)
 
 ## Quick Start
 
@@ -93,7 +94,26 @@ make deps
 sqlplus user/password@//localhost:1521/ORCL @migrations/001_initial_schema.sql
 ```
 
-### 5. Run the Application
+### 5. Start Redis
+
+Redis is required for Kong's rate-limit counters. When using Docker Compose it starts automatically. For standalone development:
+
+```bash
+# macOS
+brew install redis && redis-server --daemonize yes
+
+# — or use Docker —
+docker run -d --name redis -p 6379:6379 redis:7-alpine
+```
+
+Set the connection variables if Redis is not on `localhost:6379`:
+
+```bash
+export KONG_REDIS_HOST=localhost
+export KONG_REDIS_PORT=6379
+```
+
+### 6. Run the Application
 
 ```bash
 make run
@@ -171,6 +191,73 @@ The JWT must be issued by the Rust authentication backend and contain:
 - `login_session`: Session ID
 - `tenant_id`: Tenant identifier
 
+## Kong API Gateway
+
+All traffic is routed through [Kong](https://konghq.com/) running in DB-less (declarative) mode. The gateway handles rate limiting, CORS, request correlation, and request size limits.
+
+### Ports
+
+| Port | Purpose |
+|------|---------|
+| `8000` | Proxy — all client traffic goes here |
+| `8443` | Proxy (SSL) |
+
+> **Admin API (8001) and Kong Manager GUI (8002)** are bound to `127.0.0.1` inside the container and are **not** published to the host. Access them via:
+>
+> ```bash
+> docker exec kong curl -s http://127.0.0.1:8001/status
+> ```
+
+### Architecture
+
+```
+Client → :8000 Kong → :8080 gprint → Oracle DB
+                         ↕
+                       Redis (rate-limit counters)
+```
+
+The `gprint` container only exposes port 8080 inside the Docker network; external access goes through Kong on port 8000.
+Oracle ports (1521/5500) are also internal-only by default. To expose them for local development:
+
+```bash
+docker compose --profile dev up
+```
+
+### Configuration
+
+Kong's declarative config lives in [`kong/kong.yml`](kong/kong.yml). After editing, reload with:
+
+```bash
+docker compose restart kong
+```
+
+### Included Plugins
+
+| Plugin | Scope | Description |
+|--------|-------|-------------|
+| `rate-limiting` | Global | 100 req/min per IP (Redis-backed) |
+| `request-size-limiting` | Global | 10 MB max payload |
+| `cors` | Global | Explicit origin allowlist with credentials. Edit the `origins` list in the `cors` plugin block of [kong/kong.yml](kong/kong.yml) to add your allowed origins. |
+| `correlation-id` | Global | `X-Request-Id` tracing header |
+| `file-log` | Service (gprint-api) | Request log to stdout; redacts `Authorization` header |
+
+### Verify Kong is Running
+
+```bash
+# Pipe through jq for pretty-printing (optional — omit "| jq ." if jq is not installed)
+docker exec kong curl -s http://127.0.0.1:8001/status | jq .
+```
+
+### Access API Through Kong
+
+```bash
+# Health check
+curl http://localhost:8000/health
+
+# API call (same paths, port 8000 instead of 8080)
+curl -H "Authorization: Bearer <token>" http://localhost:8000/api/v1/customers
+```
+
 ## Docker
 
 ### Build Image
@@ -229,6 +316,9 @@ make lint
 | `ORACLE_PASSWORD` | Oracle password | - |
 | `JWT_SECRET` | JWT signing secret (must match Rust backend) | - |
 | `AUTH_SERVICE_URL` | Rust auth service URL | `http://localhost:8081` |
+| `KONG_REDIS_HOST` | Redis host for Kong rate-limit counters | `redis` (Docker) |
+| `KONG_REDIS_PORT` | Redis port | `6379` |
+| `KONG_REDIS_PASSWORD` | Redis password (if auth is enabled) | - |
 
 ## License
 
